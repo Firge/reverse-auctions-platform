@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: catalog
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  parser:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    profiles:
+      - parse
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      PYTHONUNBUFFERED: "1"
+    command: >
+      python tools/parse_tssc.py
+      --method camelot
+      --progress-every 25
+
+  loader:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    profiles:
+      - load
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - postgres
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://catalog:catalog@postgres:5432/catalog
+    command: >
+      python tools/load_tssc_to_postgres.py
+      --input-glob /app/out/items_*.jsonl
+      --schema /app/tools/schema.sql
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    profiles:
+      - pipeline
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - postgres
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://catalog:catalog@postgres:5432/catalog
+    command: >
+      /bin/sh -c "
+      python tools/parse_tssc.py --method camelot --page-start 3 --page-end 357 --progress-every 25 &&
+      python tools/load_tssc_to_postgres.py --input-glob /app/out/items_*.jsonl --schema /app/tools/schema.sql
+      "
+
+volumes:
+  pgdata:
