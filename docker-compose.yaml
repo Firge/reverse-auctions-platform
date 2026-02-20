@@ -9,6 +9,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U catalog" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   parser:
     build:
@@ -65,5 +70,103 @@ services:
       python tools/load_tssc_to_postgres.py --input-glob /app/out/items_*.jsonl --schema /app/tools/schema.sql
       "
 
+  redis:
+    image: redis:8-alpine
+    container_name: redis_broker
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: django_app
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_DEBUG=1
+      - DB_NAME=catalog
+      - DB_USER=catalog
+      - DB_PASSWORD=catalog
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: celery_worker
+    restart: unless-stopped
+    command: celery -A bidfall worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    environment:
+      - DJANGO_DEBUG=1
+      - DB_NAME=catalog
+      - DB_USER=catalog
+      - DB_PASSWORD=catalog
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: celery_beat
+    restart: unless-stopped
+    command: celery -A bidfall beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./backend:/app
+    environment:
+      - DJANGO_DEBUG=1
+      - DB_NAME=catalog
+      - DB_USER=catalog
+      - DB_PASSWORD=catalog
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+
 volumes:
   pgdata:
+  redis_data:
