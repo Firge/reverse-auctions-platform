@@ -1,8 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
+from django.db import transaction
 
-from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction
+from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction, CatalogItem
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -30,18 +31,12 @@ class RegisterSerializer(serializers.Serializer):
 
 class BidSerializer(serializers.ModelSerializer):
     bid = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    comment = serializers.CharField()
 
     class Meta:
         model = Bid
         fields = '__all__'
         read_only_fields = ('owner', 'auction')
-
-    def validate_bid(self, value):
-        if value < 0:
-            raise serializers.ValidationError('Bid must be greater than 0')
-        if value > self.context['auction'].budget:
-            raise serializers.ValidationError('Bid cannot be greater than budget')
-        return value
 
     def create(self, validated_data):
         return super().create(validated_data)
@@ -61,12 +56,12 @@ class AuctionItemSerializer(serializers.ModelSerializer):
 class AuctionSerializer(serializers.ModelSerializer):
     auction_type = serializers.CharField(source='auction_type.model', read_only=True)
     specific = serializers.SerializerMethodField()
-    catalog_items = AuctionItemSerializer(source='items.all', many=True, read_only=True)
+    lots = AuctionItemSerializer(source='items.all', many=True, read_only=True)
 
     class Meta:
         model = Auction
-        fields = ['id', 'owner', 'title', 'description', 'start_price', 'start_date', 'end_date', 'status',
-                  'auction_type', 'specific', 'catalog_items']
+        fields = ['id', 'owner', 'title', 'description', 'start_price', 'current_price', 'start_date', 'end_date', 'status',
+                  'auction_type', 'specific', 'lots']
 
     def get_specific(self, obj):
         if obj.specific_auction:
@@ -112,18 +107,45 @@ class AuctionCreateSerializerFactory:
 
 
 class BaseAuctionCreateSerializer(serializers.Serializer):
-    title = serializers.CharField()
-    description = serializers.CharField()
-    start_price = serializers.DecimalField(max_digits=12, decimal_places=2)
-    start_date = serializers.DateTimeField()
-    end_date = serializers.DateTimeField()
-    auction_type = serializers.CharField()
+    title = serializers.CharField(required=True)
+    description = serializers.CharField(required=True)
+    start_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    start_date = serializers.DateTimeField(required=True)
+    end_date = serializers.DateTimeField(required=True)
+    auction_type = serializers.CharField(required=True)
+    lots = serializers.ListField(child=serializers.DictField())
 
     def validate_auction_type(self, value):
         registered_names = AuctionCreateSerializerFactory.get_registered_names()
         if value not in registered_names:
             raise serializers.ValidationError(f"Invalid auction type '{value}', supported: {registered_names}")
         return value
+
+    def validate_lots(self, value):
+        validated_lots = []
+        for lot in value:
+            if 'id' not in lot:
+                raise serializers.ValidationError("Each lot must have an 'id' field")
+            if 'quantity' not in lot:
+                raise serializers.ValidationError("Each lot must have a 'quantity' field")
+
+            try:
+                lot_id = int(lot['id'])
+                quantity = float(lot['quantity'])
+                if quantity <= 0:
+                    raise serializers.ValidationError(f"Quantity must be positive for lot {lot_id}")
+
+                if not CatalogItem.objects.filter(id=lot_id).exists():
+                    raise serializers.ValidationError(f"Catalog item with id {lot_id} does not exist")
+
+                validated_lots.append({
+                    'id': lot_id,
+                    'quantity': quantity
+                })
+            except (ValueError, TypeError):
+                raise serializers.ValidationError(f"Invalid id or quantity format in lot: {lot}")
+
+        return validated_lots
 
     @property
     def common_fields(self):
@@ -140,17 +162,26 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
     def to_representation(self, instance):
         return AuctionSerializer(instance, context=self.context).data
 
-    def create(self, validated_data):
+    def _extract_data(self, validated_data):
         common_data = {}
         specific_data = {}
+
         for key, value in validated_data.items():
             if key in self.specific_fields:
                 specific_data[key] = value
-            if key in self.common_fields:
+            elif key in self.common_fields:
                 common_data[key] = value
-        specific_auction = self.specific_model.objects.create(**specific_data)
 
+        return common_data, specific_data
+
+    @transaction.atomic
+    def create(self, validated_data):
+        lots_data = validated_data.pop('lots')
+        common_data, specific_data = self._extract_data(validated_data)
+
+        specific_auction = self.specific_model.objects.create(**specific_data)
         common_data['auction_type'] = ContentType.objects.get_for_model(self.specific_model)
+
         auction = Auction.objects.create(
             **common_data,
             owner=self.context['request'].user,
@@ -158,7 +189,57 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
             specific_auction=specific_auction
         )
 
+        auction_items = []
+        for lot_data in lots_data:
+            auction_items.append(AuctionItem(
+                auction=auction,
+                catalog_item_id=lot_data['id'],
+                quantity=lot_data['quantity']
+            ))
+
+        AuctionItem.objects.bulk_create(auction_items)
+
         return auction
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        lots_data = validated_data.pop('lots', None)
+        common_data, specific_data = self._extract_data(validated_data)
+
+        new_auction_type = common_data['auction_type']
+        old_auction_type = instance.auction_type.model
+
+        if old_auction_type != new_auction_type:
+            old_specific = instance.specific_auction
+            new_specific = self.specific_model.objects.create(**specific_data)
+
+            instance.auction_type = ContentType.objects.get_for_model(self.specific_model)
+            instance.object_id = new_specific.id
+            instance.specific_auction = new_specific
+
+            old_specific.delete()
+        else:
+            for attr, value in specific_data.items():
+                setattr(instance.specific_auction, attr, value)
+
+        for attr, value in common_data.items():
+            if attr != 'auction_type':
+                setattr(instance, attr, value)
+
+        instance.save()
+
+        if lots_data is not None:
+            instance.items.all().delete()
+            auction_items = []
+            for lot_data in lots_data:
+                auction_items.append(AuctionItem(
+                    auction=instance,
+                    catalog_item_id=lot_data['id'],
+                    quantity=lot_data['quantity']
+                ))
+            AuctionItem.objects.bulk_create(auction_items)
+
+        return instance
 
 
 @AuctionCreateSerializerFactory.register("reverseenglishauction")

@@ -1,7 +1,9 @@
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import MethodNotAllowed
 from django.contrib.auth.models import User
+from django.db.models import Q
 
 from .serializers import RegisterSerializer, AuctionSerializer, BidSerializer, AuctionCreateSerializerFactory
 from .models import Auction, Bid
@@ -30,17 +32,19 @@ class AuctionViewSet(viewsets.ModelViewSet):
     permission_classes = (permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly)
 
     def get_serializer_class(self):
-        if self.action == 'create':
+        if self.action in ['create', 'update', 'partial_update']:
             auction_type = self.request.data.get('auction_type')
             return AuctionCreateSerializerFactory.get_serializer(auction_type)
         return super().get_serializer_class()
 
-    def perform_create(self, serializer):
-        serializer.save()
+    def destroy(self, request, *args, **kwargs):
+        raise MethodNotAllowed(request.method)
 
     @action(detail=False, methods=['get'])
     def active(self, request):
-        active_auctions = Auction.objects.filter(finished=False)
+        active_auctions = Auction.objects.filter(
+            Q(status=Auction.Status.ACTIVE)
+        )
         serializer = AuctionSerializer(active_auctions, many=True)
         return Response(serializer.data)
 
@@ -73,6 +77,3 @@ class AuctionViewSet(viewsets.ModelViewSet):
             }, status.HTTP_400_BAD_REQUEST)
         strategy = AuctionStrategyFactory.get_strategy(auction)
         return Response(BidSerializer(strategy.determine_winner(auction)).data)
-
-
-
