@@ -5,6 +5,7 @@ from django.db.models import Q
 import logging
 
 from .models import Auction
+from .auctions import determine_and_persist_winner
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ def close_expired_auctions_concurrent():
             try:
                 auction.status = Auction.Status.FINISHED
                 auction.save(update_fields=['status'])
+                determine_and_persist_winner(auction)
                 logger.info(f"Auction #{auction.id} finished")
             except Exception as e:
                 logger.error(f"Error during auction processing #{auction.id}: {str(e)}")

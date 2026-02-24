@@ -1,5 +1,8 @@
 # reverse-auctions-platform
 
+## Run / Setup Guide
+See `docs/RUNBOOK.md` for startup modes (local/Docker, online/offline), troubleshooting, and environment setup.
+
 
 
 ## Tools & automation

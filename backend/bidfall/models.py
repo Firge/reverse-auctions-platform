@@ -2,6 +2,37 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+
+class Profile(models.Model):
+    class Role(models.TextChoices):
+        BUYER = "buyer", "Закупщик"
+        SUPPLIER = "supplier", "Поставщик"
+        ADMIN = "admin", "Администратор"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.SUPPLIER)
+    company_name = models.CharField(max_length=255, blank=True)
+    inn = models.CharField(max_length=12, blank=True)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+
+    def __str__(self):
+        return f"{self.user.username} ({self.role})"
+
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        Profile.objects.get_or_create(user=instance)
+
+
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    if not hasattr(instance, 'profile'):
+        Profile.objects.create(user=instance)
+    instance.profile.save()
 
 
 class CatalogNode(models.Model):
@@ -77,8 +108,10 @@ class CatalogItem(models.Model):
 class Auction(models.Model):
     class Status(models.TextChoices):
         DRAFT = "DRAFT"
+        PUBLISHED = "PUBLISHED"
         ACTIVE = "ACTIVE"
         FINISHED = "FINISHED"
+        CLOSED = "CLOSED"
         CANCELED = "CANCELED"
     id = models.AutoField(primary_key=True)
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -89,6 +122,14 @@ class Auction(models.Model):
     start_date = models.DateTimeField()
     end_date = models.DateTimeField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    winner_bid = models.ForeignKey(
+        'Bid',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='won_auctions',
+    )
+    winner_determined_at = models.DateTimeField(null=True, blank=True)
 
     auction_type = models.ForeignKey(ContentType, on_delete=models.CASCADE,
                                      limit_choices_to={'app_label': 'bidfall'})
@@ -105,7 +146,8 @@ class Auction(models.Model):
 class AuctionItem(models.Model):
     id = models.AutoField(primary_key=True)
     auction = models.ForeignKey(Auction, on_delete=models.CASCADE, related_name='items')
-    catalog_item = models.ForeignKey(CatalogItem, on_delete=models.CASCADE)
+    # Catalog tables are managed by external loader, so keep app migrations independent.
+    catalog_item = models.ForeignKey(CatalogItem, on_delete=models.CASCADE, db_constraint=False)
     quantity = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -122,7 +164,7 @@ class Bid(models.Model):
     auction = models.ForeignKey(Auction, on_delete=models.CASCADE, related_name='bids')
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     bid = models.DecimalField(max_digits=12, decimal_places=2)
-    comment = models.TextField()
+    comment = models.TextField(blank=True, default="")
 
 
 class ReverseEnglishAuction(models.Model):
