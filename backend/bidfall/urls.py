@@ -25,12 +25,12 @@ from . import views
 
 
 router = SimpleRouter()
-router.register('api/auction', views.AuctionViewSet)
+router.register('api/auctions', views.AuctionViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/register/', views.RegisterView.as_view(), name='register'),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/register/', views.RegisterView.as_view(), name='register'),
+    path('api/auth/login/', TokenObtainPairView.as_view(), name='login'),
+    path('api/auth/refresh/', TokenRefreshView.as_view(), name='refresh'),
 ]
 urlpatterns += router.urls

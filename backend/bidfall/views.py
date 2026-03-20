@@ -1,7 +1,9 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.exceptions import MethodNotAllowed
+from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
 from django.contrib.auth.models import User
 from django.db.models import Q
 
@@ -31,6 +33,16 @@ class AuctionViewSet(viewsets.ModelViewSet):
     serializer_class = AuctionSerializer
     permission_classes = (permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly)
 
+    def get_queryset(self):
+        qs = Auction.objects.all()
+        if self.action == 'list':
+            return qs.exclude(status=Auction.Status.DRAFT)
+
+        user = self.request.user
+        if not user.is_authenticated:
+            return qs.exclude(status=Auction.Status.DRAFT)
+        return qs.filter(Q(owner=user) | ~Q(status=Auction.Status.DRAFT))
+
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             auction_type = self.request.data.get('auction_type')
@@ -42,9 +54,7 @@ class AuctionViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def active(self, request):
-        active_auctions = Auction.objects.filter(
-            Q(status=Auction.Status.ACTIVE)
-        )
+        active_auctions = Auction.objects.filter(status=Auction.Status.ACTIVE)
         serializer = AuctionSerializer(active_auctions, many=True)
         return Response(serializer.data)
 
@@ -58,14 +68,21 @@ class AuctionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def place_bid(self, request, pk):
         auction = self.get_object()
+        raw_bid = request.data.get('bid', request.data.get('bid_amount'))
+        try:
+            bid_amount = Decimal(str(raw_bid))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({"error": "Invalid bid amount."}, status=status.HTTP_400_BAD_REQUEST)
+
+        comment = request.data.get('comment', '')
         strategy = AuctionStrategyFactory.get_strategy(auction)
         try:
-            strategy.validate_bid(auction, request.data.get('bid'))
+            strategy.validate_bid(auction, bid_amount)
         except ValueError as e:
             return Response({
                 "error": str(e),
-            }, status.HTTP_400_BAD_REQUEST)
-        strategy.process_bid(auction, request.data.get('bid'), request.user)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        strategy.process_bid(auction, bid_amount, request.user, comment=comment)
         return Response({"success": True})
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])

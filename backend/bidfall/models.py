@@ -105,7 +105,7 @@ class Auction(models.Model):
 class AuctionItem(models.Model):
     id = models.AutoField(primary_key=True)
     auction = models.ForeignKey(Auction, on_delete=models.CASCADE, related_name='items')
-    catalog_item = models.ForeignKey(CatalogItem, on_delete=models.CASCADE)
+    catalog_item = models.ForeignKey(CatalogItem, on_delete=models.CASCADE, db_constraint=False)
     quantity = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -122,7 +122,7 @@ class Bid(models.Model):
     auction = models.ForeignKey(Auction, on_delete=models.CASCADE, related_name='bids')
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     bid = models.DecimalField(max_digits=12, decimal_places=2)
-    comment = models.TextField()
+    comment = models.TextField(blank=True, default="")
 
 
 class ReverseEnglishAuction(models.Model):
