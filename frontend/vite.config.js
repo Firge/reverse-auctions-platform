@@ -8,8 +8,14 @@ export default defineConfig({
         host: "0.0.0.0",
         port: 5173,
         proxy: {
-            "/api": apiProxyTarget,
-            "/admin": apiProxyTarget,
+            "/api": {
+                target: apiProxyTarget,
+                changeOrigin: false,   // сохраняем исходный Host от браузера (localhost:5173)
+            },
+            "/admin": {
+                target: apiProxyTarget,
+                changeOrigin: false,
+            },
         },
     },
 });

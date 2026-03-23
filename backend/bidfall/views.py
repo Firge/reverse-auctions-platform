@@ -91,6 +91,13 @@ class AuctionViewSet(viewsets.ModelViewSet):
     serializer_class = AuctionSerializer
     permission_classes = (permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly)
 
+    def get_permissions(self):
+        if self.action == "bids":
+            if self.request.method == "GET":
+                return [IsOwner()]
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
+
     def get_queryset(self):
         qs = Auction.objects.all()
         if self.action == 'list':
@@ -141,14 +148,15 @@ class AuctionViewSet(viewsets.ModelViewSet):
             determine_and_persist_winner(auction)
         return Response(AuctionSerializer(auction).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['get'], permission_classes=[IsOwner])
+    @action(detail=True, methods=['get', 'post'], permission_classes=[IsOwner], url_path="bids", url_name="bids")
     def bids(self, request, pk):
-        auction = self.get_object()
-        bids = Bid.objects.filter(auction=auction)
-        serializer = BidSerializer(bids, many=True)
-        return Response(serializer.data)
+        if request.method == "GET":
+            auction = self.get_object()
+            bids = Bid.objects.filter(auction=auction)
+            serializer = BidSerializer(bids, many=True)
+            return Response(serializer.data)
+        return self.place_bid(request, pk)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path="bids")
     def place_bid(self, request, pk):
         auction = self.get_object()
         if auction.status != Auction.Status.ACTIVE:

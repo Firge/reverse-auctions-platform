@@ -70,6 +70,21 @@ services:
       python tools/load_tssc_to_postgres.py --input-glob /app/out/items_*.jsonl --schema /app/tools/schema.sql
       "
 
+  init-catalog:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql://catalog:catalog@postgres:5432/catalog
+      PYTHONUNBUFFERED: "1"
+    command: python tools/check_and_init.py
+
   redis:
     image: redis:8-alpine
     container_name: redis_broker
@@ -112,6 +127,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      init-catalog:
+        condition: service_completed_successfully
 
   celery_worker:
     build:
@@ -166,6 +183,17 @@ services:
         condition: service_healthy
       web:
         condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      network: host
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+      - VITE_DEV_API_PROXY=http://django_app:8000
 
 volumes:
   pgdata:
