@@ -208,3 +208,45 @@ __marimo__/
 
 # jsonl
 out/
+
+# Frontend
+frontend/node_modules/
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/dist/
+frontend/.vite/
+
+# Docker / local ops (keep main docker-compose.yaml tracked)
+docker-compose.override.yml
+docker-compose.override.yaml
+docker-compose.local.yml
+docker-compose.local.yaml
+compose.override.yml
+compose.override.yaml
+
+# Local Docker bind-mount data dirs (common names)
+docker-data/
+.docker-data/
+volumes/
+postgres_data/
+postgres-data/
+pgdata/
+redis_data/
+redis-data/
+
+# Runtime / temp files often produced during local orchestration
+*.pid.lock
+*.stackdump
+tmp/
+temp/
+
+# Local env variants (examples remain tracked)
+*.env.local
+.env.local
+.env.*.local
+
+# Editor / OS noise (safe defaults for team repos)
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
