@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from django.db import transaction
+from django.utils import timezone
 
 from .models import Auction, ReverseEnglishAuction, Bid
 
@@ -66,3 +67,11 @@ class ReverseEnglishAuctionStrategy(AuctionStrategy):
 
     def calculate_current_price(self, auction):
         return auction.current_price
+
+
+def determine_and_persist_winner(auction: Auction):
+    strategy = AuctionStrategyFactory.get_strategy(auction)
+    winner_bid = strategy.determine_winner(auction)
+    auction.winner_bid = winner_bid
+    auction.winner_determined_at = timezone.now()
+    auction.save(update_fields=['winner_bid', 'winner_determined_at'])

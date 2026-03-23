@@ -32,5 +32,9 @@ urlpatterns = [
     path('api/auth/register/', views.RegisterView.as_view(), name='register'),
     path('api/auth/login/', TokenObtainPairView.as_view(), name='login'),
     path('api/auth/refresh/', TokenRefreshView.as_view(), name='refresh'),
+    path('api/auth/me/', views.me_view, name='me'),
+    path('api/auth/me/auctions/', views.my_auctions_view, name='me-auctions'),
+    path('api/auth/me/participating-auctions/', views.my_participating_auctions_view, name='me-participating-auctions'),
+    path('api/server-time/', views.server_time_view, name='server-time'),
 ]
 urlpatterns += router.urls

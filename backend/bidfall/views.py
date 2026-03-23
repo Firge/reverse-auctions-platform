@@ -1,16 +1,69 @@
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from rest_framework import generics, permissions, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
 from django.contrib.auth.models import User
 from django.db.models import Q
+from django.utils import timezone
 
-from .serializers import RegisterSerializer, AuctionSerializer, BidSerializer, AuctionCreateSerializerFactory
+from .serializers import (
+    RegisterSerializer,
+    AccountUpdateSerializer,
+    AuctionSerializer,
+    BidSerializer,
+    AuctionCreateSerializerFactory
+)
 from .models import Auction, Bid
 from .permissions import IsOwnerOrReadOnly, IsOwner
-from .auctions import AuctionStrategyFactory
+from .auctions import AuctionStrategyFactory, determine_and_persist_winner
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def server_time_view(request):
+    now = timezone.now()
+    return Response({
+        "server_time": now.isoformat(),
+        "server_time_ms": int(now.timestamp() * 1000),
+    })
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def me_view(request):
+    if request.method == 'PATCH':
+        serializer = AccountUpdateSerializer(instance=request.user, data=request.data, partial=True, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+    profile = getattr(request.user, 'profile', None)
+    return Response({
+        "id": request.user.id,
+        "username": request.user.username,
+        "email": request.user.email,
+        "profile": {
+            "role": getattr(profile, "role", None),
+            "company_name": getattr(profile, "company_name", ""),
+            "inn": getattr(profile, "inn", ""),
+            "rating": getattr(profile, "rating", None),
+        },
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def my_auctions_view(request):
+    auctions = Auction.objects.filter(owner=request.user).order_by('-end_date')
+    return Response(AuctionSerializer(auctions, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def my_participating_auctions_view(request):
+    auctions = Auction.objects.filter(bids__owner=request.user).distinct().order_by('-end_date')
+    return Response(AuctionSerializer(auctions, many=True).data)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -24,7 +77,12 @@ class RegisterView(generics.CreateAPIView):
         user = serializer.save()
 
         return Response({
+            "id": user.id,
+            "user_id": user.id,
+            "username": user.username,
             "email": user.email,
+            "role": user.profile.role,
+            "rating": user.profile.rating,
         }, status=status.HTTP_201_CREATED)
 
 
@@ -52,11 +110,36 @@ class AuctionViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         raise MethodNotAllowed(request.method)
 
+    def perform_create(self, serializer):
+        role = getattr(getattr(self.request.user, 'profile', None), 'role', None)
+        if role not in ('buyer', 'admin'):
+            raise PermissionDenied("Only buyers can create auctions.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        auction = self.get_object()
+        if auction.status != Auction.Status.DRAFT:
+            raise PermissionDenied("Only draft auctions can be edited by the author.")
+
+        serializer.save()
+
     @action(detail=False, methods=['get'])
     def active(self, request):
         active_auctions = Auction.objects.filter(status=Auction.Status.ACTIVE)
         serializer = AuctionSerializer(active_auctions, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsOwner])
+    def close(self, request, pk):
+        auction = self.get_object()
+
+        if auction.status in (Auction.Status.CLOSED, Auction.Status.FINISHED, Auction.Status.CANCELED):
+            return Response({"error": "Auction is already closed or finished."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            auction.status = Auction.Status.CLOSED
+            auction.save(update_fields=["status"])
+            determine_and_persist_winner(auction)
+        return Response(AuctionSerializer(auction).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], permission_classes=[IsOwner])
     def bids(self, request, pk):
@@ -65,12 +148,19 @@ class AuctionViewSet(viewsets.ModelViewSet):
         serializer = BidSerializer(bids, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path="bids")
     def place_bid(self, request, pk):
         auction = self.get_object()
+        if auction.status != Auction.Status.ACTIVE:
+            return Response({"error": "Auction is not active."}, status=status.HTTP_400_BAD_REQUEST)
+
+        role = request.user.profile.role
+        if role not in ('supplier', 'admin'):
+            return Response({"error": "Only suppliers can place bids."}, status=status.HTTP_403_FORBIDDEN)
+
         raw_bid = request.data.get('bid', request.data.get('bid_amount'))
         try:
-            bid_amount = Decimal(str(raw_bid))
+            bid_amount = Decimal(raw_bid)
         except (InvalidOperation, TypeError, ValueError):
             return Response({"error": "Invalid bid amount."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -88,9 +178,11 @@ class AuctionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def winner(self, request, pk):
         auction = self.get_object()
-        if auction.status != Auction.Status.FINISHED:
+        if auction.status not in (Auction.Status.FINISHED, Auction.Status.CLOSED):
             return Response({
                 "error": f"Auction is not finished yet.",
-            }, status.HTTP_400_BAD_REQUEST)
-        strategy = AuctionStrategyFactory.get_strategy(auction)
-        return Response(BidSerializer(strategy.determine_winner(auction)).data)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        winner_bid = auction.winner_bid
+        if winner_bid is None:
+            return Response({"error": "No bids found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(BidSerializer(winner_bid).data)

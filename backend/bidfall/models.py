@@ -4,6 +4,19 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 
+class Profile(models.Model):
+    class Role(models.TextChoices):
+        BUYER = "buyer", "Закупщик"
+        SUPPLIER = "supplier", "Поставщик"
+        ADMIN = "admin", "Администратор"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.SUPPLIER)
+    company_name = models.CharField(max_length=255, blank=True)
+    inn = models.CharField(max_length=12, blank=True)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+
+
 class CatalogNode(models.Model):
     class Kind(models.TextChoices):
         SECTION = "section", "Секция"
@@ -77,8 +90,10 @@ class CatalogItem(models.Model):
 class Auction(models.Model):
     class Status(models.TextChoices):
         DRAFT = "DRAFT"
+        PUBLISHED = "PUBLISHED"
         ACTIVE = "ACTIVE"
         FINISHED = "FINISHED"
+        CLOSED = "CLOSED"
         CANCELED = "CANCELED"
     id = models.AutoField(primary_key=True)
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -100,6 +115,15 @@ class Auction(models.Model):
         through='AuctionItem',
         related_name='auctions'
     )
+
+    winner_bid = models.ForeignKey(
+        'Bid',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='won_auctions',
+    )
+    winner_determined_at = models.DateTimeField(null=True, blank=True)
 
 
 class AuctionItem(models.Model):

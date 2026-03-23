@@ -5,13 +5,16 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction, CatalogItem
+from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction, CatalogItem, Profile
 
 
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(min_length=3, max_length=20, required=True)
     email = serializers.EmailField(required=True)
     password = serializers.CharField(write_only=True, required=True)
+    role = serializers.ChoiceField(choices=Profile.Role.choices, required=True)
+    company_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    inn = serializers.CharField(max_length=12, required=False, allow_blank=True)
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -31,11 +34,72 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
-        return User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-        )
+        role = validated_data.pop('role')
+        company_name = validated_data.pop('company_name', '')
+        inn = validated_data.pop('inn', '')
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=validated_data['username'],
+                email=validated_data['email'],
+                password=validated_data['password'],
+            )
+            profile, _ = Profile.objects.get_or_create(user=user, defaults={'role': role})
+            profile.role = role
+            profile.company_name = company_name
+            profile.inn = inn
+            profile.save()
+        return user
+
+
+class AccountUpdateSerializer(serializers.Serializer):
+    username = serializers.CharField(min_length=3, max_length=20, required=False)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=False)
+    role = serializers.ChoiceField(choices=Profile.Role.choices, required=False)
+    company_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    inn = serializers.CharField(max_length=12, required=False, allow_blank=True)
+
+    def validate_username(self, value):
+        user = self.context["request"].user
+        if User.objects.filter(username__iexact=value).exclude(id=user.id).exists():
+            raise serializers.ValidationError("A user with this username already exists.")
+        return value
+
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except ValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value
+
+    def validate_role(self, value):
+        user = self.context["request"].user
+        current_role = user.profile.role
+        if current_role != value:
+            raise serializers.ValidationError("Role cannot be changed.")
+        return value
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        profile, _ = Profile.objects.get_or_create(user=instance)
+
+        password = validated_data.pop("password", None)
+        company_name = validated_data.pop("company_name", None)
+        inn = validated_data.pop("inn", None)
+
+        username = validated_data.get("username")
+        if username is not None:
+            instance.username = username
+        if password:
+            instance.set_password(password)
+        instance.save()
+
+        if company_name is not None:
+            profile.company_name = company_name
+        if inn is not None:
+            profile.inn = inn
+        profile.save()
+        return instance
+
 
 
 class BidSerializer(serializers.ModelSerializer):
@@ -66,7 +130,7 @@ class AuctionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Auction
         fields = ['id', 'owner', 'title', 'description', 'start_price', 'current_price', 'start_date', 'end_date', 'status',
-                  'auction_type', 'specific', 'lots']
+                  'auction_type', 'specific', 'lots', 'winner_bid', 'winner_determined_at']
 
     def get_specific(self, obj):
         if obj.specific_auction:
@@ -84,6 +148,15 @@ class AuctionSerializer(serializers.ModelSerializer):
         if serializer_class:
             return serializer_class(specific_auction)
         return None
+
+
+class BidSerializer(serializers.ModelSerializer):
+    bid = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+
+    class Meta:
+        model = Bid
+        fields = '__all__'
+        read_only_fields = ('owner', 'auction')
 
 
 class ReverseEnglishAuctionSerializer(serializers.ModelSerializer):
@@ -119,6 +192,11 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
     end_date = serializers.DateTimeField()
     auction_type = serializers.CharField()
     lots = serializers.ListField(child=serializers.DictField(), required=False)
+    status = serializers.ChoiceField(
+        choices=[Auction.Status.DRAFT, Auction.Status.PUBLISHED],
+        required=False,
+        default=Auction.Status.DRAFT,
+    )
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -158,7 +236,7 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
 
     @property
     def common_fields(self):
-        return 'title', 'description', 'start_price', 'start_date', 'end_date', 'auction_type'
+        return 'title', 'description', 'start_price', 'start_date', 'end_date', 'auction_type', 'status'
 
     @property
     def specific_model(self):
@@ -215,7 +293,7 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
         lots_data = validated_data.pop('lots', None)
         common_data, specific_data = self._extract_data(validated_data)
 
-        new_auction_type = common_data.get('auction_type')
+        new_auction_type = common_data.pop('auction_type')
         if new_auction_type is not None and new_auction_type != instance.auction_type.model:
             raise ValidationError('Changing auction type is not allowed.')
 
