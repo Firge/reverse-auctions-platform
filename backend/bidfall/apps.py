@@ -32,6 +32,22 @@ def create_periodic_tasks(sender, **kwargs):
             'enabled': True,
         }
     )
+    PeriodicTask.objects.get_or_create(
+        name='Изменение статуса ставок в обработке',
+        task='bidfall.tasks.update_pending_bids',
+        defaults={
+            'interval': interval,
+            'enabled': True,
+        }
+    )
+    PeriodicTask.objects.get_or_create(
+        name='Разморозка проигравших ставок',
+        task='bidfall.tasks.process_pending_cancel_bids',
+        defaults={
+            'interval': interval,
+            'enabled': True,
+        }
+    )
 
 
 class BidfallAppConfig(AppConfig):

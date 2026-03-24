@@ -18,7 +18,8 @@ from .serializers import (
 )
 from .models import Auction, Bid
 from .permissions import IsOwnerOrReadOnly, IsOwner
-from .auctions import AuctionStrategyFactory, determine_and_persist_winner
+from .auctions import AuctionStrategyFactory, finalize_auction_with_winner
+from .payment import freeze_funds
 
 
 @api_view(['GET'])
@@ -145,14 +146,14 @@ class AuctionViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             auction.status = Auction.Status.CLOSED
             auction.save(update_fields=["status"])
-            determine_and_persist_winner(auction)
+            finalize_auction_with_winner(auction)
         return Response(AuctionSerializer(auction).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['get', 'post'], permission_classes=[IsOwner], url_path="bids", url_name="bids")
+    @action(detail=True, methods=['get', 'post'], url_path="bids", url_name="bids")
     def bids(self, request, pk):
         if request.method == "GET":
             auction = self.get_object()
-            bids = Bid.objects.filter(auction=auction)
+            bids = Bid.objects.filter(Q(auction=auction) & (Q(status=Bid.Status.HELD) | Q(status=Bid.Status.LOSE)))
             serializer = BidSerializer(bids, many=True)
             return Response(serializer.data)
         return self.place_bid(request, pk)
@@ -180,8 +181,21 @@ class AuctionViewSet(viewsets.ModelViewSet):
             return Response({
                 "error": str(e),
             }, status=status.HTTP_400_BAD_REQUEST)
-        strategy.process_bid(auction, bid_amount, request.user, comment=comment)
-        return Response({"success": True})
+        try:
+            payment_data = freeze_funds(request.user.id, auction.id)
+            Bid.objects.create(
+                auction=auction,
+                owner=request.user,
+                bid=bid_amount,
+                comment=comment,
+                payment_id=payment_data["payment_id"],
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            "message": "Waiting for confirmation.",
+            "redirect_url": payment_data["confirmation_url"]
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def winner(self, request, pk):

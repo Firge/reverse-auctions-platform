@@ -411,7 +411,7 @@ export function App() {
     e.preventDefault(); if (!auction) return;
     if (!tokens?.access) { setToast({ kind: "error", text: "Сначала войдите в аккаунт, чтобы сделать ставку." }); go({ name: "login" }); return; }
     setBidLoading(true);
-    try { await submitBid(auction.id, tokens.access, bidForm, apiBase); setBidForm({ bid_amount: "", comment: "" }); setToast({ kind: "ok", text: "Ставка отправлена." }); await loadAuction(auction.id, true); if (detailTab === "bids") await loadBids(auction.id); await loadParticipatingAuctions(tokens.access); }
+    try { const result = await submitBid(auction.id, tokens.access, bidForm, apiBase); window.location.href = result.redirect_url; }
     catch (err) { setToast({ kind: "error", text: `Ошибка ставки: ${(err as Error).message}` }); }
     finally { setBidLoading(false); }
   }

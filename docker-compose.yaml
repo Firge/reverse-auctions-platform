@@ -112,6 +112,8 @@ services:
       - ./backend:/app
     ports:
       - "8000:8000"
+    env_file:
+      - backend/.env
     environment:
       - DJANGO_DEBUG=1
       - DB_NAME=catalog
@@ -139,6 +141,8 @@ services:
     command: celery -A bidfall worker --loglevel=info
     volumes:
       - ./backend:/app
+    env_file:
+      - backend/.env
     environment:
       - DJANGO_DEBUG=1
       - DB_NAME=catalog
@@ -166,6 +170,8 @@ services:
     command: celery -A bidfall beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     volumes:
       - ./backend:/app
+    env_file:
+      - backend/.env
     environment:
       - DJANGO_DEBUG=1
       - DB_NAME=catalog

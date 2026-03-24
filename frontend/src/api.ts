@@ -171,7 +171,7 @@ export async function submitBid(
   payload: { bid_amount: string; comment?: string },
   baseUrl?: string,
 ) {
-  return request<{ success: boolean }>(`/api/auctions/${id}/bids/`, {
+  return request<{ redirect_url: string }>(`/api/auctions/${id}/bids/`, {
     method: "POST",
     token,
     body: JSON.stringify(payload),

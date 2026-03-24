@@ -142,11 +142,21 @@ class AuctionItem(models.Model):
 
 
 class Bid(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING"
+        CANCELED = "CANCELED"
+        HELD = "HELD"
+        PENDING_LOSE = "PENDING_LOSE"
+        LOSE = "LOSE"
+
+
     id = models.AutoField(primary_key=True)
     auction = models.ForeignKey(Auction, on_delete=models.CASCADE, related_name='bids')
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     bid = models.DecimalField(max_digits=12, decimal_places=2)
     comment = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    payment_id = models.CharField(max_length=36)
 
 
 class ReverseEnglishAuction(models.Model):

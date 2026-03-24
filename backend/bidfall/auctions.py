@@ -12,7 +12,7 @@ class AuctionStrategy(ABC):
         pass
 
     @abstractmethod
-    def process_bid(self, auction, bid_amount, user, comment):
+    def process_bid(self, auction: Auction, bid: Bid):
         pass
 
     @abstractmethod
@@ -56,11 +56,9 @@ class ReverseEnglishAuctionStrategy(AuctionStrategy):
         if auction.current_price - bid_amount < specific.min_bid_decrement:
             raise ValueError(f"Bid decrement must be at least {specific.min_bid_decrement}")
 
-    def process_bid(self, auction, bid_amount, user, comment):
-        with transaction.atomic():
-            auction.current_price = bid_amount
-            auction.save(update_fields=['current_price'])
-            Bid.objects.create(auction=auction, owner=user, bid=bid_amount, comment=comment)
+    def process_bid(self, auction: Auction, bid: Bid):
+        auction.current_price = bid.bid
+        auction.save(update_fields=['current_price'])
 
     def determine_winner(self, auction):
         return auction.bids.order_by('bid').first()
@@ -69,9 +67,11 @@ class ReverseEnglishAuctionStrategy(AuctionStrategy):
         return auction.current_price
 
 
-def determine_and_persist_winner(auction: Auction):
+def finalize_auction_with_winner(auction: Auction):
     strategy = AuctionStrategyFactory.get_strategy(auction)
     winner_bid = strategy.determine_winner(auction)
     auction.winner_bid = winner_bid
     auction.winner_determined_at = timezone.now()
     auction.save(update_fields=['winner_bid', 'winner_determined_at'])
+
+    auction.bids.exclude(id=winner_bid.id).filter(status=Bid.Status.HELD).update(status=Bid.Status.PENDING_LOSE)
