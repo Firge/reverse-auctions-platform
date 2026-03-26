@@ -1,4 +1,4 @@
-name: Build with Docker Compose
+name: Build and Push Docker Artifacts
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository }}
 
 jobs:
   build:
@@ -33,9 +34,10 @@ jobs:
         uses: docker/bake-action@v5
         with:
           files: |
-            docker-compose.yml
             docker-compose.build.hcl
+          targets: default
           push: true
           set: |
-            *.tags=${{ env.REGISTRY }}/${{ github.repository }}/${{ github.ref_name }}-${{ github.sha }}
-            *.tags=${{ env.REGISTRY }}/${{ github.repository }}/${{ github.ref_name }}-latest
+            backend.tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/backend:${{ github.sha }},${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/backend:latest
+            frontend.tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/frontend:${{ github.sha }},${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/frontend:latest
+            tools.tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/tools:${{ github.sha }},${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/tools:latest

@@ -3,6 +3,27 @@
 ## Run / Setup Guide
 See `docs/RUNBOOK.md` for startup modes (local/Docker, online/offline), troubleshooting, and environment setup.
 
+## CI/CD Docker artifacts
+
+The repository publishes Docker artifacts to GHCR on each push to `main` via GitHub Actions.
+
+Published images:
+- `ghcr.io/<owner>/<repo>/backend:<sha>` and `:latest`
+- `ghcr.io/<owner>/<repo>/frontend:<sha>` and `:latest`
+- `ghcr.io/<owner>/<repo>/tools:<sha>` and `:latest`
+
+Pipeline files:
+- `.github/workflows/docker-image.yml`
+- `docker-compose.build.hcl`
+
+To run image-based deployment locally:
+1. Copy `.env.prod.example` to `.env.prod` and set `IMAGE_NAMESPACE`.
+2. Pull images from GHCR:
+	- `docker pull ghcr.io/<owner>/<repo>/backend:latest`
+	- `docker pull ghcr.io/<owner>/<repo>/frontend:latest`
+3. Start production compose:
+	- `docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d`
+
 
 
 ## Tools & automation

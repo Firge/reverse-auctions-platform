@@ -15,6 +15,35 @@ This project has a Django backend (`backend/`) and a Vite+React frontend (`front
 - Frontend (Vite dev): `http://127.0.0.1:5173`
 - Frontend API calls in dev go to `/api/...` and are proxied to backend.
 
+## CI/CD Artifacts (GHCR)
+
+On every push to `main`, GitHub Actions builds and pushes three images:
+
+- `ghcr.io/<owner>/<repo>/backend:<sha>` and `latest`
+- `ghcr.io/<owner>/<repo>/frontend:<sha>` and `latest`
+- `ghcr.io/<owner>/<repo>/tools:<sha>` and `latest`
+
+Workflow and build definition:
+
+- `.github/workflows/docker-image.yml`
+- `docker-compose.build.hcl`
+
+### Run Production Image Stack
+
+1. Create env file from template:
+
+```bash
+cp .env.prod.example .env.prod
+```
+
+2. Update `IMAGE_NAMESPACE` in `.env.prod` (for example `my-org/reverse-auctions-platform`).
+
+3. Start stack from published images:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+```
+
 ## Quick Start (Most Reliable on a New Machine)
 
 ### Option A: Hybrid (Docker DB/Redis + local backend/frontend)
