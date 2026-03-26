@@ -16,7 +16,7 @@ variable "IMAGE_TAG" {
 
 target "backend" {
   context    = "./backend"
-  dockerfile = "./backend/Dockerfile"
+  dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   tags = [
     "${REGISTRY}/${IMAGE_NAMESPACE}/backend:${IMAGE_TAG}",
@@ -26,7 +26,7 @@ target "backend" {
 
 target "frontend" {
   context    = "./frontend"
-  dockerfile = "./frontend/Dockerfile"
+  dockerfile = "./Dockerfile"
   platforms  = ["linux/amd64"]
   tags = [
     "${REGISTRY}/${IMAGE_NAMESPACE}/frontend:${IMAGE_TAG}",
