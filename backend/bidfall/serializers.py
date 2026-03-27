@@ -101,14 +101,18 @@ class AccountUpdateSerializer(serializers.Serializer):
         return instance
 
 
-
 class BidSerializer(serializers.ModelSerializer):
-    bid = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = Bid
-        fields = '__all__'
-        read_only_fields = ('owner', 'auction')
+        fields = ['id', 'auction', 'owner', 'bid', 'comment', 'status']
+
+    def get_status(self, obj):
+        status = obj.status
+        if status.startswith('PENDING_'):
+            return status[8:]
+        return status
 
 
 class AuctionItemSerializer(serializers.ModelSerializer):
@@ -148,15 +152,6 @@ class AuctionSerializer(serializers.ModelSerializer):
         if serializer_class:
             return serializer_class(specific_auction)
         return None
-
-
-class BidSerializer(serializers.ModelSerializer):
-    bid = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
-
-    class Meta:
-        model = Bid
-        fields = '__all__'
-        read_only_fields = ('owner', 'auction')
 
 
 class ReverseEnglishAuctionSerializer(serializers.ModelSerializer):

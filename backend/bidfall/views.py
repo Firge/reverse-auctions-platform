@@ -92,13 +92,6 @@ class AuctionViewSet(viewsets.ModelViewSet):
     serializer_class = AuctionSerializer
     permission_classes = (permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly)
 
-    def get_permissions(self):
-        if self.action == "bids":
-            if self.request.method == "GET":
-                return [IsOwner()]
-            return [permissions.IsAuthenticated()]
-        return super().get_permissions()
-
     def get_queryset(self):
         qs = Auction.objects.all()
         if self.action == 'list':
@@ -149,12 +142,15 @@ class AuctionViewSet(viewsets.ModelViewSet):
             finalize_auction_with_winner(auction)
         return Response(AuctionSerializer(auction).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['get', 'post'], url_path="bids", url_name="bids")
+    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAuthenticated])
     def bids(self, request, pk):
         if request.method == "GET":
             auction = self.get_object()
-            bids = Bid.objects.filter(Q(auction=auction) & (Q(status=Bid.Status.HELD) | Q(status=Bid.Status.LOSE)))
-            serializer = BidSerializer(bids, many=True)
+            bids_qs = Bid.objects.filter(auction=auction)
+            bids_qs = bids_qs.exclude(
+                status__in=[Bid.Status.PENDING, Bid.Status.CANCELED]
+            )
+            serializer = BidSerializer(bids_qs, many=True)
             return Response(serializer.data)
         return self.place_bid(request, pk)
 
@@ -182,7 +178,11 @@ class AuctionViewSet(viewsets.ModelViewSet):
                 "error": str(e),
             }, status=status.HTTP_400_BAD_REQUEST)
         try:
-            payment_data = freeze_funds(request.user.id, auction.id)
+            payment_data = freeze_funds(
+                request.user.id,
+                auction.id,
+                description=f"Заморозка для участия в аукционе #{auction.id}"
+            )
             Bid.objects.create(
                 auction=auction,
                 owner=request.user,

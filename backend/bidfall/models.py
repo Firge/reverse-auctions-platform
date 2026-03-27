@@ -148,7 +148,11 @@ class Bid(models.Model):
         HELD = "HELD"
         PENDING_LOSE = "PENDING_LOSE"
         LOSE = "LOSE"
-
+        WON = "WON"
+        PENDING_RELEASED = "PENDING_RELEASED"
+        RELEASED = "RELEASED"
+        PENDING_FORFEIT = "PENDING_FORFEIT"
+        FORFEIT = "FORFEIT"
 
     id = models.AutoField(primary_key=True)
     auction = models.ForeignKey(Auction, on_delete=models.CASCADE, related_name='bids')
