@@ -3,9 +3,7 @@ import uuid
 import logging
 from decimal import Decimal
 
-from yookassa import Configuration, Payment, Refund
-from yookassa.domain.response.payment_response import PaymentResponse
-from yookassa.domain.exceptions import BadRequestError, UnauthorizedError
+from yookassa import Configuration, Payment
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

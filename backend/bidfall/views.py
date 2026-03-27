@@ -16,7 +16,7 @@ from .serializers import (
     BidSerializer,
     AuctionCreateSerializerFactory
 )
-from .models import Auction, Bid
+from .models import Auction, Bid, PaymentTransaction
 from .permissions import IsOwnerOrReadOnly, IsOwner
 from .auctions import AuctionStrategyFactory, finalize_auction_with_winner
 from .payment import freeze_funds
@@ -142,6 +142,29 @@ class AuctionViewSet(viewsets.ModelViewSet):
             finalize_auction_with_winner(auction)
         return Response(AuctionSerializer(auction).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsOwner])
+    def publish(self, request, pk):
+        auction = self.get_object()
+
+        if auction.status != Auction.Status.DRAFT:
+            return Response({"error": "Only draft auction can be published."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_data = freeze_funds(
+            request.user.id,
+            auction.id,
+            description=f"Заморозка для публикации аукциона #{auction.id}"
+        )
+        PaymentTransaction.objects.create(
+            user=request.user,
+            auction=auction,
+            type=PaymentTransaction.Type.AUCTION_CREATION_HOLD,
+            payment_id=payment_data["payment_id"],
+        )
+        return Response({
+            "message": "Waiting for confirmation.",
+            "redirect_url": payment_data["confirmation_url"]
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAuthenticated])
     def bids(self, request, pk):
         if request.method == "GET":
@@ -183,11 +206,16 @@ class AuctionViewSet(viewsets.ModelViewSet):
                 auction.id,
                 description=f"Заморозка для участия в аукционе #{auction.id}"
             )
-            Bid.objects.create(
+            bid = Bid.objects.create(
                 auction=auction,
                 owner=request.user,
                 bid=bid_amount,
                 comment=comment,
+            )
+            PaymentTransaction.objects.create(
+                user=request.user,
+                bid=bid,
+                type=PaymentTransaction.Type.BID_PLACEMENT_HOLD,
                 payment_id=payment_data["payment_id"],
             )
         except Exception as e:

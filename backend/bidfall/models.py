@@ -95,6 +95,8 @@ class Auction(models.Model):
         FINISHED = "FINISHED"
         CLOSED = "CLOSED"
         CANCELED = "CANCELED"
+        COMPLETED = "COMPLETED"
+
     id = models.AutoField(primary_key=True)
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     title = models.CharField(max_length=200)
@@ -146,12 +148,9 @@ class Bid(models.Model):
         PENDING = "PENDING"
         CANCELED = "CANCELED"
         HELD = "HELD"
-        PENDING_LOSE = "PENDING_LOSE"
         LOSE = "LOSE"
         WON = "WON"
-        PENDING_RELEASED = "PENDING_RELEASED"
         RELEASED = "RELEASED"
-        PENDING_FORFEIT = "PENDING_FORFEIT"
         FORFEIT = "FORFEIT"
 
     id = models.AutoField(primary_key=True)
@@ -160,9 +159,39 @@ class Bid(models.Model):
     bid = models.DecimalField(max_digits=12, decimal_places=2)
     comment = models.TextField(blank=True, default="")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    payment_id = models.CharField(max_length=36)
 
 
 class ReverseEnglishAuction(models.Model):
     id = models.AutoField(primary_key=True)
     min_bid_decrement = models.DecimalField(max_digits=12, decimal_places=2, default=1.00)
+
+
+class PaymentTransaction(models.Model):
+    class Type(models.TextChoices):
+        BID_PLACEMENT_HOLD = "BID_PLACEMENT_HOLD"
+        BID_CONCURRENT_RELEASE = "BID_CONCURRENT_RELEASE"
+        BID_LOSS_RELEASE = "BID_LOSS_RELEASE"
+        BID_WIN_SIGNED_RELEASE = "BID_WIN_SIGNED_RELEASE"
+        BID_WIN_FORFEIT_CHARGE = "BID_WIN_FORFEIT_CHARGE"
+        AUCTION_CREATION_HOLD = "AUCTION_CREATION_HOLD"
+        AUCTION_SIGNED_RELEASE = "AUCTION_SIGNED_RELEASE"
+        AUCTION_FORFEIT_CHARGE = "AUCTION_FORFEIT_CHARGE"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING"
+        CANCELED = "CANCELED"
+        HELD = "HELD"
+        CHARGED = "CHARGED"
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    auction = models.OneToOneField(Auction, on_delete=models.CASCADE, null=True, blank=True)
+    bid = models.OneToOneField(Bid, on_delete=models.CASCADE, null=True, blank=True)
+
+    type = models.CharField(max_length=32, choices=Type.choices)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+
+    payment_id = models.CharField(max_length=36, unique=True, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

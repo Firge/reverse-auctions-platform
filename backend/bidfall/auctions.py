@@ -4,7 +4,8 @@ from typing import List
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Auction, ReverseEnglishAuction, Bid
+from .models import Auction, ReverseEnglishAuction, Bid, PaymentTransaction
+from .payment import cancel_payment
 
 
 class AuctionStrategy(ABC):
@@ -96,4 +97,17 @@ def finalize_auction_with_winner(auction: Auction, num_winners: int = 3):
     if winner_ids:
         all_held_bids.filter(id__in=winner_ids).update(status=Bid.Status.WON)
 
-    all_held_bids.exclude(id__in=winner_ids).update(status=Bid.Status.PENDING_LOSE)
+    for bid in all_held_bids.exclude(id__in=winner_ids):
+        original_payment = PaymentTransaction.objects.get(
+            bid=bid,
+            type=PaymentTransaction.Type.BID_PLACEMENT_HOLD,
+            status=PaymentTransaction.Status.HELD
+        )
+        cancel_payment(original_payment.payment_id)
+        PaymentTransaction.objects.create(
+            user=original_payment.user,
+            bid=bid,
+            type=PaymentTransaction.Type.BID_LOSS_RELEASE,
+            payment_id=original_payment.payment_id,
+        )
+

@@ -17,14 +17,6 @@ def create_periodic_tasks(sender, **kwargs):
         }
     )
     PeriodicTask.objects.get_or_create(
-        name='Автоматический старт аукционов',
-        task='bidfall.tasks.start_published_auctions',
-        defaults={
-            'interval': interval,
-            'enabled': True,
-        }
-    )
-    PeriodicTask.objects.get_or_create(
         name='Автоматическое окончание аукционов',
         task='bidfall.tasks.finish_expired_auctions',
         defaults={
@@ -33,16 +25,8 @@ def create_periodic_tasks(sender, **kwargs):
         }
     )
     PeriodicTask.objects.get_or_create(
-        name='Изменение статуса ставок в обработке',
-        task='bidfall.tasks.update_pending_bids',
-        defaults={
-            'interval': interval,
-            'enabled': True,
-        }
-    )
-    PeriodicTask.objects.get_or_create(
-        name='Разморозка проигравших ставок',
-        task='bidfall.tasks.process_pending_cancel_bids',
+        name='Обработка платежей',
+        task='bidfall.tasks.process_pending_payments',
         defaults={
             'interval': interval,
             'enabled': True,
