@@ -32,6 +32,14 @@ def create_periodic_tasks(sender, **kwargs):
             'enabled': True,
         }
     )
+    PeriodicTask.objects.get_or_create(
+        name='Обработка подтверждений',
+        task='bidfall.tasks.process_finished_confirmations',
+        defaults={
+            'interval': interval,
+            'enabled': True,
+        }
+    )
 
 
 class BidfallAppConfig(AppConfig):

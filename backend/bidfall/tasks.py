@@ -5,7 +5,8 @@ from django.db.models import Q
 import logging
 
 from .auctions import finalize_auction_with_winner
-from .models import Auction, PaymentTransaction
+from .confirmation import update_confirmation_flow
+from .models import Auction, PaymentTransaction, ConfirmationFlow
 from .payment import check_payment_status
 from .payment_transaction import PaymentTransactionService
 
@@ -70,3 +71,19 @@ def process_pending_payments():
             except Exception as e:
                 logger.exception(f"Error during payment processing #{payment.id}: {str(e)}")
                 continue
+
+
+@shared_task(ignore_result=True)
+def process_finished_confirmations():
+    now = timezone.now()
+
+    expired_confirmation = ConfirmationFlow.objects.filter(
+        status=ConfirmationFlow.Status.PENDING,
+        signing_deadline__lte=now
+    )
+    for expired_confirmation in expired_confirmation:
+        try:
+            update_confirmation_flow(expired_confirmation)
+        except Exception as e:
+            logger.exception(f"Error during confirmation processing #{expired_confirmation}: {str(e)}")
+            continue

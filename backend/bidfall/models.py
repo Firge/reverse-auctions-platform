@@ -185,13 +185,32 @@ class PaymentTransaction(models.Model):
 
     id = models.AutoField(primary_key=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    auction = models.OneToOneField(Auction, on_delete=models.CASCADE, null=True, blank=True)
-    bid = models.OneToOneField(Bid, on_delete=models.CASCADE, null=True, blank=True)
+    auction = models.ForeignKey(Auction, on_delete=models.CASCADE, null=True, blank=True)
+    bid = models.ForeignKey(Bid, on_delete=models.CASCADE, null=True, blank=True)
 
     type = models.CharField(max_length=32, choices=Type.choices)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
 
-    payment_id = models.CharField(max_length=36, unique=True, db_index=True)
+    payment_id = models.CharField(max_length=36)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ConfirmationFlow(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING"
+        FAILED = "FAILED"
+        SUCCESS = "SUCCESS"
+
+    id = models.AutoField(primary_key=True)
+
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.PENDING)
+    auction = models.OneToOneField(Auction, on_delete=models.CASCADE, related_name='confirmation_flow')
+
+    signing_deadline = models.DateTimeField()
+    creator_signed_at = models.DateTimeField(null=True, blank=True)
+    winner_signed_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

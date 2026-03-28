@@ -18,13 +18,19 @@ class BasePaymentTransactionHandler:
         self.auction = payment.auction
 
     def handle_canceled(self):
-        raise NotImplementedError()
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement handle_canceled()"
+        )
 
     def handle_held(self):
-        raise NotImplementedError()
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement handle_held()"
+        )
 
     def handle_charged(self):
-        raise NotImplementedError()
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement handle_charged()"
+        )
 
 
 class PaymentTransactionService:
@@ -164,7 +170,7 @@ class AuctionSignedReleaseHandler(BasePaymentTransactionHandler):
 
 @PaymentTransactionService.register_handler(PaymentTransaction.Type.AUCTION_FORFEIT_CHARGE)
 class AuctionForfeitChargeHandler(BasePaymentTransactionHandler):
-    def handle_canceled(self):
+    def handle_charged(self):
         self.auction.status = Auction.Status.CANCELED
         self.auction.save()
         logger.info(f"Auction #{self.auction.id} charged")

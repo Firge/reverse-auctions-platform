@@ -76,3 +76,20 @@ def cancel_payment(payment_id: str) -> dict:
     except Exception as e:
         logger.error(f"Error during payment canceling: {e}")
         raise
+
+
+def capture_payment(payment_id: str, amount: float = None):
+    capture_data = {}
+    if amount is not None:
+        capture_data["amount"] = {
+            "value": f"{amount:.2f}",
+            "currency": "RUB"
+        }
+
+    try:
+        payment = Payment.capture(payment_id, capture_data)
+        logger.info(f"Payment {payment_id} captured. Status: {payment.status}")
+        return payment
+    except Exception as e:
+        logger.error(f"Error during payment capture: {e}")
+        raise

@@ -9,6 +9,8 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
 
+from .auctions import AuctionStrategyFactory, finalize_auction_with_winner
+from .confirmation import update_confirmation_flow
 from .serializers import (
     RegisterSerializer,
     AccountUpdateSerializer,
@@ -16,10 +18,9 @@ from .serializers import (
     BidSerializer,
     AuctionCreateSerializerFactory
 )
-from .models import Auction, Bid, PaymentTransaction
-from .permissions import IsOwnerOrReadOnly, IsOwner
-from .auctions import AuctionStrategyFactory, finalize_auction_with_winner
+from .models import Auction, Bid, PaymentTransaction, ConfirmationFlow
 from .payment import freeze_funds
+from .permissions import IsOwnerOrReadOnly, IsOwner
 
 
 @api_view(['GET'])
@@ -234,5 +235,100 @@ class AuctionViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         winner_bid = auction.winner_bid
         if winner_bid is None:
-            return Response({"error": "No bids found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "No winner bid found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BidSerializer(winner_bid).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsOwner], url_path="confirm-creator")
+    def confirm_creator(self, request, pk):
+        auction = self.get_object()
+        if auction.status not in (Auction.Status.FINISHED, Auction.Status.CLOSED):
+            return Response({
+                "error": f"Auction is not finished yet.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        confirmation = ConfirmationFlow.objects.filter(auction=auction).first()
+        if not confirmation:
+            return Response({"error": "No confirmation found."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            confirmation = ConfirmationFlow.objects.select_for_update().get(pk=confirmation.pk)
+
+            if confirmation.creator_signed_at is not None:
+                return Response(
+                    {"error": "Creator already signed."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if timezone.now() > confirmation.signing_deadline:
+                return Response(
+                    {"error": "Signing deadline has passed."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            confirmation.creator_signed_at = timezone.now()
+            confirmation.save(update_fields=['creator_signed_at'])
+
+            update_confirmation_flow(confirmation)
+
+        return Response({"status": "Creator signed successfully."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path="confirm-winner")
+    def confirm_winner(self, request, pk):
+        auction = self.get_object()
+        if auction.status not in (Auction.Status.FINISHED, Auction.Status.CLOSED):
+            return Response({
+                "error": f"Auction is not finished yet.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        winner_bid = auction.winner_bid
+        if winner_bid is None:
+            return Response({"error": "No winner bid found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user != winner_bid.owner:
+            raise PermissionDenied("Only the winner can confirm.")
+
+        confirmation = ConfirmationFlow.objects.filter(auction=auction).first()
+        if not confirmation:
+            return Response({"error": "No confirmation found."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            confirmation = ConfirmationFlow.objects.select_for_update().get(pk=confirmation.pk)
+
+            if confirmation.winner_signed_at is not None:
+                return Response(
+                    {"error": "Winner already signed."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if timezone.now() > confirmation.signing_deadline:
+                return Response(
+                    {"error": "Signing deadline has passed."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            confirmation.winner_signed_at = timezone.now()
+            confirmation.save(update_fields=['winner_signed_at'])
+
+            update_confirmation_flow(confirmation)
+
+        return Response({"status": "Winner signed successfully."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated], url_path="confirmation")
+    def confirmation_status(self, request, pk):
+        auction = self.get_object()
+        user = request.user
+
+        if user != auction.owner and (not auction.winner_bid or user != auction.winner_bid.owner):
+            raise PermissionDenied("Only the auction creator or winner can view confirmation status.")
+
+        confirmation = ConfirmationFlow.objects.filter(auction=auction).first()
+        if not confirmation:
+            return Response({"error": "No confirmation found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = {
+            "creator_signed_at": confirmation.creator_signed_at.isoformat() if confirmation.creator_signed_at else None,
+            "winner_signed_at": confirmation.winner_signed_at.isoformat() if confirmation.winner_signed_at else None,
+            "signing_deadline": confirmation.signing_deadline.isoformat(),
+            "status": confirmation.status if confirmation else None,
+        }
+        return Response(data)
