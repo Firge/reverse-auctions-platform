@@ -72,10 +72,18 @@ jobs:
 
             DEPLOY_PARENT="$(dirname "$DEPLOY_PATH")"
             mkdir -p "$DEPLOY_PARENT"
-            if [ -d "$DEPLOY_PATH" ]; then
-              rm -rf "$DEPLOY_PATH"
+
+            if [ -d "$DEPLOY_PATH/.git" ]; then
+              if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
+                git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
+              else
+                git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
+              fi
+              git -C "$DEPLOY_PATH" fetch --depth 1 origin main
+              git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
+            else
+              git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
             fi
-            git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
 
             cp "$ENV_PROD_SOURCE_PATH" "$DEPLOY_PATH/.env.prod"
 
@@ -90,7 +98,22 @@ jobs:
             docker compose --env-file .env.prod -f docker-compose.prod.yaml pull
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d postgres redis
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
+
+            DB_USER="$(grep -E '^POSTGRES_USER=' .env.prod | tail -n1 | cut -d= -f2-)"
+            DB_NAME="$(grep -E '^POSTGRES_DB=' .env.prod | tail -n1 | cut -d= -f2-)"
+            if [ -z "$DB_USER" ]; then DB_USER="catalog"; fi
+            if [ -z "$DB_NAME" ]; then DB_NAME="catalog"; fi
+
+            CATALOG_READY="$(docker compose --env-file .env.prod -f docker-compose.prod.yaml exec -T postgres \
+              psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'catalog_items') AND (SELECT COUNT(*) FROM catalog_items) > 0 THEN 1 ELSE 0 END;")"
+
+            if [ "$CATALOG_READY" = "1" ]; then
+              echo "Catalog already exists in DB. Skipping init-catalog."
+            else
+              echo "Catalog not found or empty. Running init-catalog."
+              docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
+            fi
+
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml ps
