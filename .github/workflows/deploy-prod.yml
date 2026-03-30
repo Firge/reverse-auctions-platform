@@ -41,13 +41,12 @@ jobs:
           GHCR_USERNAME: ${{ env.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
           REPO_SLUG: ${{ env.REPO_SLUG }}
-          REPO_URL: ${{ secrets.VPS_GIT_REPO_URL }}
           DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,REPO_URL,DEPLOY_PATH
+          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH
           script_stop: true
           script: |
             set -euo pipefail
@@ -57,26 +56,19 @@ jobs:
               exit 1
             fi
 
-            if [ -z "${REPO_URL:-}" ]; then
-              REPO_URL="https://github.com/${REPO_SLUG}.git"
-            fi
+            REPO_URL="https://x-access-token:${GHCR_TOKEN}@github.com/${REPO_SLUG}.git"
 
             mkdir -p "$DEPLOY_PATH"
-            if [ ! -d "$DEPLOY_PATH/.git" ]; then
-              git -C "$DEPLOY_PATH" init
-              if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
-                git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
-              else
-                git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
-              fi
-              git -C "$DEPLOY_PATH" fetch --depth 1 origin main
-              git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
+            git -C "$DEPLOY_PATH" init
+            if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
+              git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
+            else
+              git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
             fi
 
             cd "$DEPLOY_PATH"
-            git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
+            git fetch --depth 1 origin main
+            git checkout -B main FETCH_HEAD
 
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
