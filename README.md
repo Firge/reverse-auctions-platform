@@ -36,6 +36,8 @@ Published images:
 - `ghcr.io/<owner>/<repo>/backend:<sha>` and `:latest`
 - `ghcr.io/<owner>/<repo>/frontend:<sha>` and `:latest`
 - `ghcr.io/<owner>/<repo>/tools:<sha>` and `:latest`
+- `ghcr.io/<owner>/<repo>/smtp-worker:<sha>` and `:latest`
+- `ghcr.io/<owner>/<repo>/smtp-relay:<sha>` and `:latest`
 
 Pipeline files:
 - `.github/workflows/docker-image.yml`

@@ -1,5 +1,5 @@
 group "default" {
-  targets = ["backend", "frontend", "tools"]
+  targets = ["backend", "frontend", "tools", "smtp-worker", "smtp-relay"]
 }
 
 variable "REGISTRY" {
@@ -41,5 +41,25 @@ target "tools" {
   tags = [
     "${REGISTRY}/${IMAGE_NAMESPACE}/tools:${IMAGE_TAG}",
     "${REGISTRY}/${IMAGE_NAMESPACE}/tools:latest"
+  ]
+}
+
+target "smtp-worker" {
+  context    = "./smtp/service"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  tags = [
+    "${REGISTRY}/${IMAGE_NAMESPACE}/smtp-worker:${IMAGE_TAG}",
+    "${REGISTRY}/${IMAGE_NAMESPACE}/smtp-worker:latest"
+  ]
+}
+
+target "smtp-relay" {
+  context    = "./smtp/postfix"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  tags = [
+    "${REGISTRY}/${IMAGE_NAMESPACE}/smtp-relay:${IMAGE_TAG}",
+    "${REGISTRY}/${IMAGE_NAMESPACE}/smtp-relay:latest"
   ]
 }
