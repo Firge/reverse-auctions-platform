@@ -3,6 +3,31 @@
 ## Run / Setup Guide
 See `docs/RUNBOOK.md` for startup modes (local/Docker, online/offline), troubleshooting, and environment setup.
 
+## Auction Email Notifications (separate service)
+
+Implemented as two independent containers in compose (backend code is unchanged):
+
+- `postfix_relay` - internal SMTP relay that forwards mail to external SMTP provider over 587/465.
+- `email_worker` - Python polling worker that reads auction winner state from PostgreSQL and sends notifications.
+
+What `email_worker` sends:
+
+- winner notification to auction winner
+- result notification to auction initiator
+- if winner changes later, new notifications are sent for the new `winner_bid`
+
+Quick start (dev):
+
+1. Copy SMTP vars example and fill provider credentials:
+	- `cp smtp/.env.example .env.smtp.local`
+2. Start stack with env files:
+	- `docker compose --env-file .env.smtp.local up --build -d`
+
+Important:
+
+- Closing SSH port `22` does not block outgoing SMTP from containers.
+- For reliable delivery use authenticated relay on port `587` (STARTTLS) or `465` (TLS).
+
 ## CI/CD Docker artifacts
 
 The repository publishes Docker artifacts to GHCR on each push to `main` via GitHub Actions.

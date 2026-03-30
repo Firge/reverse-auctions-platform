@@ -228,3 +228,65 @@ Invoke-RestMethod http://127.0.0.1:5173/api/auctions/
 - `frontend/vite.config.js` is the active Vite config (single source of truth).
 - `frontend/src/main.tsx` imports `app_market_clean.tsx` as the current UI entry.
 - `_new.py` merge-helper files were removed after integrating safe changes.
+
+## SMTP Notifications Service (Postfix relay + Python worker)
+
+The repository includes an independent notification stack in `smtp/`.
+
+Components:
+
+- `postfix_relay`: accepts mail on internal Docker network and relays to external SMTP.
+- `email_worker`: polls PostgreSQL every `POLL_INTERVAL_SECONDS` and sends two notifications when winner is determined:
+   - to auction initiator
+   - to auction winner
+
+Behavior:
+
+- Backend Django/Celery code is not modified.
+- Deduplication key: `auction_id + winner_bid_id + recipient_type`.
+- If a new winner is selected (different `winner_bid_id`), worker sends a new notification pair.
+- Retries are stored in `smtp_notifications` table in PostgreSQL.
+
+### Configuration
+
+Use variables from `smtp/.env.example`:
+
+- relay settings: `SMTP_RELAY_HOST`, `SMTP_RELAY_PORT`, `SMTP_RELAY_TLS`, `SMTP_RELAY_USERNAME`, `SMTP_RELAY_PASSWORD`
+- sender: `SMTP_FROM`
+- worker tuning: `POLL_INTERVAL_SECONDS`, `MAX_RETRY_ATTEMPTS`, `RETRY_BASE_SECONDS`, `LOOKBACK_DAYS`
+- frontend auction link: `FRONTEND_AUCTION_URL_TEMPLATE`
+
+### Start (dev)
+
+```bash
+cp smtp/.env.example .env.smtp.local
+docker compose --env-file .env.smtp.local up --build -d postfix_relay email_worker
+```
+
+### Start (prod compose)
+
+```bash
+cp .env.prod.example .env.prod
+cp smtp/.env.example .env.smtp.prod
+docker compose --env-file .env.prod --env-file .env.smtp.prod -f docker-compose.prod.yaml up -d --build postfix_relay email_worker
+```
+
+### Diagnostics
+
+```bash
+docker compose logs -f postfix_relay
+docker compose logs -f email_worker
+```
+
+Look for `email sent` and `email failed` events in `email_worker` logs.
+
+### DNS checklist for bebra.works
+
+Before production sending, configure:
+
+- SPF record authorizing SMTP provider
+- DKIM key from provider
+- DMARC policy (at least `p=none` for monitoring phase)
+- matching hostname in `SMTP_MYHOSTNAME`
+
+Without SPF/DKIM/DMARC, deliverability and spam placement will be poor.

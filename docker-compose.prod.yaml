@@ -96,6 +96,57 @@ services:
       web:
         condition: service_started
 
+  postfix_relay:
+    build:
+      context: ./smtp/postfix
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - RELAY_HOST=${SMTP_RELAY_HOST:-smtp.yandex.ru}
+      - RELAY_PORT=${SMTP_RELAY_PORT:-587}
+      - RELAY_TLS=${SMTP_RELAY_TLS:-encrypt}
+      - RELAY_USERNAME=${SMTP_RELAY_USERNAME:-}
+      - RELAY_PASSWORD=${SMTP_RELAY_PASSWORD:-}
+      - MYHOSTNAME=${SMTP_MYHOSTNAME:-mail.bebra.works}
+      - MYNETWORKS=127.0.0.0/8,172.16.0.0/12
+    healthcheck:
+      test: ["CMD-SHELL", "postfix status >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  email_worker:
+    build:
+      context: ./smtp/service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DB_NAME=${POSTGRES_DB:-catalog}
+      - DB_USER=${POSTGRES_USER:-catalog}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-catalog}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - SMTP_HOST=postfix_relay
+      - SMTP_PORT=25
+      - SMTP_FROM=${SMTP_FROM:-no-reply@bebra.works}
+      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-45}
+      - MAX_RETRY_ATTEMPTS=${MAX_RETRY_ATTEMPTS:-6}
+      - RETRY_BASE_SECONDS=${RETRY_BASE_SECONDS:-60}
+      - LOOKBACK_DAYS=${LOOKBACK_DAYS:-30}
+      - FRONTEND_AUCTION_URL_TEMPLATE=${FRONTEND_AUCTION_URL_TEMPLATE:-https://bebra.works/auctions/{auction_id}}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postfix_relay:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import os,time,sys;p='/tmp/email_worker_heartbeat';sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   frontend:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-owner/reverse-auctions-platform}/frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
