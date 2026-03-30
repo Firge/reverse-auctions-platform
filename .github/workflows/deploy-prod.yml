@@ -63,8 +63,14 @@ jobs:
 
             mkdir -p "$DEPLOY_PATH"
             if [ ! -d "$DEPLOY_PATH/.git" ]; then
-              rm -rf "$DEPLOY_PATH"
-              git clone --depth 1 "$REPO_URL" "$DEPLOY_PATH"
+              git -C "$DEPLOY_PATH" init
+              if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
+                git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
+              else
+                git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
+              fi
+              git -C "$DEPLOY_PATH" fetch --depth 1 origin main
+              git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
             fi
 
             cd "$DEPLOY_PATH"
