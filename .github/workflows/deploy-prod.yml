@@ -51,7 +51,8 @@ jobs:
           envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH,ENV_PROD_SOURCE_PATH
           script_stop: true
           script: |
-            set -euo pipefail
+            set -eu
+            echo "[deploy] script started"
 
             if [ -z "${DEPLOY_PATH:-}" ]; then
               echo "VPS_DEPLOY_PATH is empty"
@@ -67,13 +68,17 @@ jobs:
               echo "Source env file not found: $ENV_PROD_SOURCE_PATH"
               exit 1
             fi
+            echo "[deploy] env paths validated"
 
             REPO_URL="https://x-access-token:${GHCR_TOKEN}@github.com/${REPO_SLUG}.git"
+            echo "[deploy] repo URL prepared"
 
             DEPLOY_PARENT="$(dirname "$DEPLOY_PATH")"
             mkdir -p "$DEPLOY_PARENT"
+            echo "[deploy] deploy parent ensured: $DEPLOY_PARENT"
 
             if [ -d "$DEPLOY_PATH/.git" ]; then
+              echo "[deploy] existing git repo found, fetching"
               if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
                 git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
               else
@@ -82,22 +87,28 @@ jobs:
               git -C "$DEPLOY_PATH" fetch --depth 1 origin main
               git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
             else
+              echo "[deploy] cloning fresh repo"
               git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
             fi
+            echo "[deploy] repository ready"
 
             cp "$ENV_PROD_SOURCE_PATH" "$DEPLOY_PATH/.env.prod"
+            echo "[deploy] .env.prod copied"
 
             cd "$DEPLOY_PATH"
 
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            echo "[deploy] docker login ok"
 
             export IMAGE_REGISTRY=ghcr.io
             export IMAGE_NAMESPACE="$IMAGE_NAMESPACE"
             export IMAGE_TAG="$IMAGE_TAG"
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml pull
+            echo "[deploy] images pulled"
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d postgres redis
+            echo "[deploy] postgres/redis started"
 
             DB_USER="$(grep -E '^POSTGRES_USER=' .env.prod | tail -n1 | cut -d= -f2-)"
             DB_NAME="$(grep -E '^POSTGRES_DB=' .env.prod | tail -n1 | cut -d= -f2-)"
@@ -115,5 +126,7 @@ jobs:
             fi
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+            echo "[deploy] services updated"
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml ps
+            echo "[deploy] done"
