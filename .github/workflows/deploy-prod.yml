@@ -5,6 +5,12 @@ on:
     workflows: ["Build and Push Docker Artifacts"]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (for example: latest or commit SHA)"
+        required: false
+        default: "latest"
 
 permissions:
   contents: read
@@ -15,14 +21,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
   GHCR_USERNAME: ${{ github.actor }}
   GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   REPO_SLUG: ${{ github.repository }}
 
 jobs:
   deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -37,7 +42,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_NAMESPACE: ${{ steps.prep.outputs.image_namespace }}
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || github.event.workflow_run.head_sha }}
           GHCR_USERNAME: ${{ env.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
           REPO_SLUG: ${{ env.REPO_SLUG }}
@@ -81,26 +86,18 @@ jobs:
             ls -ld "$DEPLOY_PATH" || true
             mkdir -p "$DEPLOY_PATH"
 
-            if git -C "$DEPLOY_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            if [ -d "$DEPLOY_PATH/.git" ]; then
               echo "[deploy] existing git repo found, fetching"
-              if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
-                git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
-              else
-                git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
-              fi
-              git -C "$DEPLOY_PATH" fetch --depth 1 origin main
+              git -C "$DEPLOY_PATH" config remote.origin.url "$REPO_URL"
+              git -C "$DEPLOY_PATH" fetch --depth 1 "$REPO_URL" main
               git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
             else
               echo "[deploy] no git repo in deploy path"
               if [ -n "$(ls -A "$DEPLOY_PATH" 2>/dev/null || true)" ]; then
                 echo "[deploy] deploy path is not empty, initializing git in place"
                 git -C "$DEPLOY_PATH" init
-                if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
-                  git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
-                else
-                  git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
-                fi
-                git -C "$DEPLOY_PATH" fetch --depth 1 origin main
+                git -C "$DEPLOY_PATH" config remote.origin.url "$REPO_URL"
+                git -C "$DEPLOY_PATH" fetch --depth 1 "$REPO_URL" main
                 git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
               else
                 echo "[deploy] cloning fresh repo"
