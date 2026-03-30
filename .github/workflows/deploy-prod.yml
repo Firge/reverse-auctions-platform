@@ -51,7 +51,7 @@ jobs:
           envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH,ENV_PROD_SOURCE_PATH
           script_stop: true
           script: |
-            set -eu
+            set -eux
             echo "[deploy] script started"
 
             if [ -z "${DEPLOY_PATH:-}" ]; then
@@ -77,7 +77,11 @@ jobs:
             mkdir -p "$DEPLOY_PARENT"
             echo "[deploy] deploy parent ensured: $DEPLOY_PARENT"
 
-            if [ -d "$DEPLOY_PATH/.git" ]; then
+            ls -ld "$DEPLOY_PARENT" || true
+            ls -ld "$DEPLOY_PATH" || true
+            mkdir -p "$DEPLOY_PATH"
+
+            if git -C "$DEPLOY_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
               echo "[deploy] existing git repo found, fetching"
               if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
                 git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
@@ -87,8 +91,21 @@ jobs:
               git -C "$DEPLOY_PATH" fetch --depth 1 origin main
               git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
             else
-              echo "[deploy] cloning fresh repo"
-              git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
+              echo "[deploy] no git repo in deploy path"
+              if [ -n "$(ls -A "$DEPLOY_PATH" 2>/dev/null || true)" ]; then
+                echo "[deploy] deploy path is not empty, initializing git in place"
+                git -C "$DEPLOY_PATH" init
+                if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
+                  git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
+                else
+                  git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
+                fi
+                git -C "$DEPLOY_PATH" fetch --depth 1 origin main
+                git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
+              else
+                echo "[deploy] cloning fresh repo"
+                git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
+              fi
             fi
             echo "[deploy] repository ready"
 
