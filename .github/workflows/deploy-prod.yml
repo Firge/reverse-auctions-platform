@@ -58,17 +58,14 @@ jobs:
 
             REPO_URL="https://x-access-token:${GHCR_TOKEN}@github.com/${REPO_SLUG}.git"
 
-            mkdir -p "$DEPLOY_PATH"
-            git -C "$DEPLOY_PATH" init
-            if git -C "$DEPLOY_PATH" remote get-url origin >/dev/null 2>&1; then
-              git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
-            else
-              git -C "$DEPLOY_PATH" remote add origin "$REPO_URL"
+            DEPLOY_PARENT="$(dirname "$DEPLOY_PATH")"
+            mkdir -p "$DEPLOY_PARENT"
+            if [ -d "$DEPLOY_PATH" ]; then
+              rm -rf "$DEPLOY_PATH"
             fi
+            git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
 
             cd "$DEPLOY_PATH"
-            git fetch --depth 1 origin main
-            git checkout -B main FETCH_HEAD
 
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
