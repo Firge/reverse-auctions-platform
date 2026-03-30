@@ -42,17 +42,28 @@ jobs:
           GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
           REPO_SLUG: ${{ env.REPO_SLUG }}
           DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+          ENV_PROD_SOURCE_PATH: ${{ secrets.VPS_ENV_PROD_PATH }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH
+          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH,ENV_PROD_SOURCE_PATH
           script_stop: true
           script: |
             set -euo pipefail
 
             if [ -z "${DEPLOY_PATH:-}" ]; then
               echo "VPS_DEPLOY_PATH is empty"
+              exit 1
+            fi
+
+            if [ -z "${ENV_PROD_SOURCE_PATH:-}" ]; then
+              echo "VPS_ENV_PROD_PATH is empty"
+              exit 1
+            fi
+
+            if [ ! -f "$ENV_PROD_SOURCE_PATH" ]; then
+              echo "Source env file not found: $ENV_PROD_SOURCE_PATH"
               exit 1
             fi
 
@@ -64,6 +75,8 @@ jobs:
               rm -rf "$DEPLOY_PATH"
             fi
             git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
+
+            cp "$ENV_PROD_SOURCE_PATH" "$DEPLOY_PATH/.env.prod"
 
             cd "$DEPLOY_PATH"
 
