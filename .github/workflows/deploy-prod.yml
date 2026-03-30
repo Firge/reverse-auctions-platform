@@ -1,0 +1,69 @@
+name: Deploy To Production
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Artifacts"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+  GHCR_USERNAME: ${{ github.actor }}
+  GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare image namespace
+        id: prep
+        run: echo "image_namespace=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_NAMESPACE: ${{ steps.prep.outputs.image_namespace }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          GHCR_USERNAME: ${{ env.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
+          DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,DEPLOY_PATH
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            cd "$DEPLOY_PATH"
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+            export IMAGE_REGISTRY=ghcr.io
+            export IMAGE_NAMESPACE="$IMAGE_NAMESPACE"
+            export IMAGE_TAG="$IMAGE_TAG"
+
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml pull
+
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d postgres redis
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml ps

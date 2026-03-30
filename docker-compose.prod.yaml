@@ -25,6 +25,20 @@ services:
       timeout: 5s
       retries: 5
 
+  init-catalog:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-owner/reverse-auctions-platform}/tools:${IMAGE_TAG:-latest}
+    restart: "no"
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-catalog}:${POSTGRES_PASSWORD:-catalog}@postgres:5432/${POSTGRES_DB:-catalog}
+      - PYTHONUNBUFFERED=1
+    command: python tools/check_and_init.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-owner/reverse-auctions-platform}/backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -49,6 +63,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      init-catalog:
+        condition: service_completed_successfully
 
   celery_worker:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-owner/reverse-auctions-platform}/backend:${IMAGE_TAG:-latest}
@@ -97,9 +113,7 @@ services:
         condition: service_started
 
   postfix_relay:
-    build:
-      context: ./smtp/postfix
-      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-owner/reverse-auctions-platform}/smtp-relay:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       - RELAY_HOST=${SMTP_RELAY_HOST:-smtp.yandex.ru}
@@ -116,9 +130,7 @@ services:
       retries: 3
 
   email_worker:
-    build:
-      context: ./smtp/service
-      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-owner/reverse-auctions-platform}/smtp-worker:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       - DB_NAME=${POSTGRES_DB:-catalog}

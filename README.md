@@ -36,7 +36,7 @@ Published images:
 - `ghcr.io/<owner>/<repo>/backend:<sha>` and `:latest`
 - `ghcr.io/<owner>/<repo>/frontend:<sha>` and `:latest`
 - `ghcr.io/<owner>/<repo>/tools:<sha>` and `:latest`
-- `ghcr.io/<owner>/<repo>/smtp-worker:<sha>` and `:latest`
+Ес- `ghcr.io/<owner>/<repo>/smtp-worker:<sha>` and `:latest`
 - `ghcr.io/<owner>/<repo>/smtp-relay:<sha>` and `:latest`
 
 Pipeline files:
@@ -68,7 +68,7 @@ To run image-based deployment locally:
 
 | Column    | Type    | Notes |
 |-----------|---------|-------|
-| id        | bigserial | PK |
+| id        | bigserial | PK |Ес
 | kind      | text    | section/subsection/group/spec |
 | name      | text    | Название узла |
 | parent_id | bigint  | FK -> catalog_nodes.id |
