@@ -86,24 +86,11 @@ jobs:
             ls -ld "$DEPLOY_PATH" || true
             mkdir -p "$DEPLOY_PATH"
 
-            if [ -d "$DEPLOY_PATH/.git" ]; then
-              echo "[deploy] existing git repo found, fetching"
-              git -C "$DEPLOY_PATH" config remote.origin.url "$REPO_URL"
-              git -C "$DEPLOY_PATH" fetch --depth 1 "$REPO_URL" main
-              git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
-            else
-              echo "[deploy] no git repo in deploy path"
-              if [ -n "$(ls -A "$DEPLOY_PATH" 2>/dev/null || true)" ]; then
-                echo "[deploy] deploy path is not empty, initializing git in place"
-                git -C "$DEPLOY_PATH" init
-                git -C "$DEPLOY_PATH" config remote.origin.url "$REPO_URL"
-                git -C "$DEPLOY_PATH" fetch --depth 1 "$REPO_URL" main
-                git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
-              else
-                echo "[deploy] cloning fresh repo"
-                git clone --depth 1 --branch main "$REPO_URL" "$DEPLOY_PATH"
-              fi
-            fi
+            echo "[deploy] syncing repository"
+            git -C "$DEPLOY_PATH" init
+            git -C "$DEPLOY_PATH" config remote.origin.url "$REPO_URL"
+            git -C "$DEPLOY_PATH" fetch --depth 1 "$REPO_URL" main
+            git -C "$DEPLOY_PATH" checkout -B main FETCH_HEAD
             echo "[deploy] repository ready"
 
             cp "$ENV_PROD_SOURCE_PATH" "$DEPLOY_PATH/.env.prod"
