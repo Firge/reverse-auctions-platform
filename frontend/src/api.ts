@@ -219,6 +219,19 @@ export async function closeAuction(
   });
 }
 
+export async function publishAuction(
+  id: number,
+  token: string,
+  baseUrl?: string,
+) {
+  return request<{ redirect_url: string }>(`/api/auctions/${id}/publish/`, {
+    method: "POST",
+    token,
+    body: JSON.stringify({}),
+    baseUrl,
+  });
+}
+
 export async function fetchAuctionWinner(
   id: number,
   token: string,

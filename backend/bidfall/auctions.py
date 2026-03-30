@@ -1,9 +1,13 @@
+import datetime
+import os
 from abc import ABC, abstractmethod
+from typing import List
 
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Auction, ReverseEnglishAuction, Bid
+from .models import Auction, ReverseEnglishAuction, Bid, PaymentTransaction, ConfirmationFlow
+from .payment import cancel_payment
 
 
 class AuctionStrategy(ABC):
@@ -16,7 +20,7 @@ class AuctionStrategy(ABC):
         pass
 
     @abstractmethod
-    def determine_winner(self, auction):
+    def determine_winners(self, auction, num_winners = 3) -> List[Bid]:
         pass
 
     @abstractmethod
@@ -60,18 +64,57 @@ class ReverseEnglishAuctionStrategy(AuctionStrategy):
         auction.current_price = bid.bid
         auction.save(update_fields=['current_price'])
 
-    def determine_winner(self, auction):
-        return auction.bids.order_by('bid').first()
+    def determine_winners(self, auction, num_winners = 3):
+        bids = auction.bids.filter(status__in=[Bid.Status.HELD, Bid.Status.WON]).order_by('bid', 'id')
+        winners = []
+        seen_users = set()
+        for bid in bids:
+            if bid.owner_id not in seen_users:
+                seen_users.add(bid.owner_id)
+                winners.append(bid)
+                if len(winners) == num_winners:
+                    break
+        return winners
 
     def calculate_current_price(self, auction):
         return auction.current_price
 
 
-def finalize_auction_with_winner(auction: Auction):
+def finalize_auction_with_winner(auction: Auction, num_winners: int = 3):
+    assert transaction.get_connection().in_atomic_block, "Must be called within transaction"
+
     strategy = AuctionStrategyFactory.get_strategy(auction)
-    winner_bid = strategy.determine_winner(auction)
-    auction.winner_bid = winner_bid
+    winner_bids = strategy.determine_winners(auction, num_winners)
+
     auction.winner_determined_at = timezone.now()
+    if winner_bids:
+        auction.winner_bid = winner_bids[0]
+    else:
+        auction.winner_bid = None
     auction.save(update_fields=['winner_bid', 'winner_determined_at'])
 
-    auction.bids.exclude(id=winner_bid.id).filter(status=Bid.Status.HELD).update(status=Bid.Status.PENDING_LOSE)
+    all_held_bids = auction.bids.filter(status=Bid.Status.HELD)
+
+    winner_ids = [bid.id for bid in winner_bids]
+    if winner_ids:
+        all_held_bids.filter(id__in=winner_ids).update(status=Bid.Status.WON)
+
+    time_to_sign = int(os.getenv("TIME_TO_SIGN", 60 * 60 * 24))
+    ConfirmationFlow.objects.create(
+        auction=auction,
+        signing_deadline=timezone.now() + datetime.timedelta(seconds=time_to_sign),
+    )
+
+    for bid in all_held_bids.exclude(id__in=winner_ids):
+        original_payment = PaymentTransaction.objects.get(
+            bid=bid,
+            type=PaymentTransaction.Type.BID_PLACEMENT_HOLD,
+            status=PaymentTransaction.Status.HELD
+        )
+        cancel_payment(original_payment.payment_id)
+        PaymentTransaction.objects.create(
+            user=original_payment.user,
+            bid=bid,
+            type=PaymentTransaction.Type.BID_LOSS_RELEASE,
+            payment_id=original_payment.payment_id,
+        )

@@ -101,14 +101,10 @@ class AccountUpdateSerializer(serializers.Serializer):
         return instance
 
 
-
 class BidSerializer(serializers.ModelSerializer):
-    bid = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
-
     class Meta:
         model = Bid
-        fields = '__all__'
-        read_only_fields = ('owner', 'auction')
+        fields = ['id', 'auction', 'bid', 'comment', 'status']
 
 
 class AuctionItemSerializer(serializers.ModelSerializer):
@@ -129,8 +125,8 @@ class AuctionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Auction
-        fields = ['id', 'owner', 'title', 'description', 'start_price', 'current_price', 'start_date', 'end_date', 'status',
-                  'auction_type', 'specific', 'lots', 'winner_bid', 'winner_determined_at']
+        fields = ['id', 'owner', 'title', 'description', 'start_price', 'current_price', 'start_date', 'end_date',
+                  'status', 'auction_type', 'specific', 'lots', 'winner_bid', 'winner_determined_at']
 
     def get_specific(self, obj):
         if obj.specific_auction:
@@ -148,15 +144,6 @@ class AuctionSerializer(serializers.ModelSerializer):
         if serializer_class:
             return serializer_class(specific_auction)
         return None
-
-
-class BidSerializer(serializers.ModelSerializer):
-    bid = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
-
-    class Meta:
-        model = Bid
-        fields = '__all__'
-        read_only_fields = ('owner', 'auction')
 
 
 class ReverseEnglishAuctionSerializer(serializers.ModelSerializer):
@@ -192,11 +179,6 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
     end_date = serializers.DateTimeField()
     auction_type = serializers.CharField()
     lots = serializers.ListField(child=serializers.DictField(), required=False)
-    status = serializers.ChoiceField(
-        choices=[Auction.Status.DRAFT, Auction.Status.PUBLISHED],
-        required=False,
-        default=Auction.Status.DRAFT,
-    )
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -236,7 +218,7 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
 
     @property
     def common_fields(self):
-        return 'title', 'description', 'start_price', 'start_date', 'end_date', 'auction_type', 'status'
+        return 'title', 'description', 'start_price', 'start_date', 'end_date', 'auction_type'
 
     @property
     def specific_model(self):
@@ -304,6 +286,7 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
             setattr(instance, attr, value)
 
         instance.save()
+        instance.specific_auction.save()
 
         if lots_data is not None:
             instance.items.all().delete()
@@ -322,7 +305,7 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
 
 @AuctionCreateSerializerFactory.register("reverseenglishauction")
 class ReverseEnglishAuctionCreateSerializer(BaseAuctionCreateSerializer):
-    min_bid_decrement = serializers.DecimalField(max_digits=12, decimal_places=2)
+    min_bid_decrement = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=1)
 
     @property
     def specific_model(self):

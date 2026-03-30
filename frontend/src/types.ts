@@ -73,7 +73,6 @@ export type AuctionCreatePayload = {
   start_price: number;
   start_date: string;
   end_date: string;
-  status?: "DRAFT" | "PUBLISHED";
   auction_type: "reverseenglishauction";
   min_bid_decrement: number;
 };
