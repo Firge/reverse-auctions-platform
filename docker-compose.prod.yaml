@@ -122,7 +122,7 @@ services:
       - RELAY_USERNAME=${SMTP_RELAY_USERNAME:-}
       - RELAY_PASSWORD=${SMTP_RELAY_PASSWORD:-}
       - MYHOSTNAME=${SMTP_MYHOSTNAME:-mail.bebra.works}
-      - MYNETWORKS=127.0.0.0/8,172.16.0.0/12
+      - MYNETWORKS=${SMTP_MYNETWORKS:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
     healthcheck:
       test: ["CMD-SHELL", "postfix status >/dev/null 2>&1"]
       interval: 30s
