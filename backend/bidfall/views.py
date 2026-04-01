@@ -8,6 +8,7 @@ from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
+from rest_framework.views import APIView
 
 from .auctions import AuctionStrategyFactory, finalize_auction_with_winner
 from .confirmation import update_confirmation_flow
@@ -16,9 +17,9 @@ from .serializers import (
     AccountUpdateSerializer,
     AuctionSerializer,
     BidSerializer,
-    AuctionCreateSerializerFactory
+    AuctionCreateSerializerFactory, CatalogNodeSerializer, CatalogItemSerializer
 )
-from .models import Auction, Bid, PaymentTransaction, ConfirmationFlow
+from .models import Auction, Bid, PaymentTransaction, ConfirmationFlow, CatalogNode, CatalogItem
 from .payment import freeze_funds
 from .permissions import IsOwnerOrReadOnly, IsOwner
 
@@ -332,3 +333,62 @@ class AuctionViewSet(viewsets.ModelViewSet):
             "status": confirmation.status if confirmation else None,
         }
         return Response(data)
+
+
+class CatalogNodeListView(generics.ListAPIView):
+    serializer_class = CatalogNodeSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        queryset = CatalogNode.objects.all()
+        parent_id = self.request.query_params.get('parent_id')
+        if parent_id is not None:
+            queryset = queryset.filter(parent_id=parent_id)
+        else:
+            queryset = queryset.filter(parent__isnull=True)
+
+        q = self.request.query_params.get('q')
+        if q:
+            queryset = queryset.filter(name__icontains=q)
+
+        return queryset
+
+
+class CatalogItemListView(generics.ListAPIView):
+    serializer_class = CatalogItemSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        queryset = CatalogItem.objects.all()
+
+        q = self.request.query_params.get('q')
+        if q:
+            queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
+
+        node_id = self.request.query_params.get('node_id')
+        if node_id is not None:
+            queryset = queryset.filter(node_id=node_id)
+
+        source_id = self.request.query_params.get('source_id')
+        if source_id is not None:
+            queryset = queryset.filter(source_id=source_id)
+
+        return queryset
+
+
+class CatalogItemByIdsView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        ids_param = request.query_params.get('ids')
+        if not ids_param:
+            return Response({"error": "ids parameter is required"}, status=400)
+
+        try:
+            ids = [int(x.strip()) for x in ids_param.split(',')]
+        except ValueError:
+            return Response({"error": "Invalid ids format"}, status=400)
+
+        items = CatalogItem.objects.filter(id__in=ids)
+        serializer = CatalogItemSerializer(items, many=True)
+        return Response(serializer.data)

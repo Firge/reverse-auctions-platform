@@ -5,7 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction, CatalogItem, Profile
+from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction, CatalogItem, Profile, CatalogNode
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -105,6 +105,27 @@ class BidSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bid
         fields = ['id', 'auction', 'bid', 'comment', 'status']
+
+
+class CatalogNodeSerializer(serializers.ModelSerializer):
+    has_children = serializers.SerializerMethodField()
+    items_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CatalogNode
+        fields = ('id', 'name', 'parent_id', 'has_children', 'items_count')
+
+    def get_has_children(self, obj):
+        return CatalogNode.objects.filter(parent=obj).exists()
+
+    def get_items_count(self, obj):
+        return CatalogItem.objects.filter(node=obj).count()
+
+
+class CatalogItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CatalogItem
+        fields = ('id', 'code', 'name', 'unit', 'node_id', 'source_id')
 
 
 class AuctionItemSerializer(serializers.ModelSerializer):
