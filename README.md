@@ -3,6 +3,16 @@
 ## Run / Setup Guide
 See `docs/RUNBOOK.md` for startup modes (local/Docker, online/offline), troubleshooting, and environment setup.
 
+## Frontend Catalog API Prototype
+
+For frontend/backend handoff on lot-catalog integration, see `docs/CATALOG_API_FRONTEND_CONTRACT.md`.
+
+Frontend now supports catalog API prototype mode:
+- `VITE_CATALOG_API_MODE=mock` - use built-in mock catalog responses without backend endpoints
+- `VITE_CATALOG_API_MODE=real` - call backend catalog endpoints
+
+You can also override mode in browser localStorage with key `bidfall_catalog_api_mode` (`mock` or `real`).
+
 ## Auction Email Notifications (separate service)
 
 Implemented as two independent containers in compose (backend code is unchanged):

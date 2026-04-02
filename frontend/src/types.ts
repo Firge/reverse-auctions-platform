@@ -41,6 +41,54 @@ export type AuctionLot = {
   quantity: string;
 };
 
+export type AuctionLotInput = {
+  id: number;
+  quantity: string;
+};
+
+export type CatalogNode = {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  has_children: boolean;
+  items_count: number;
+};
+
+export type CatalogItem = {
+  id: number;
+  code: string;
+  name: string;
+  unit: string;
+  node_id: number;
+  source_id: number | null;
+  default_quantity?: string | null;
+};
+
+export type CatalogNodesResponse = {
+  count: number;
+  results: CatalogNode[];
+};
+
+export type CatalogItemsResponse = {
+  count: number;
+  results: CatalogItem[];
+};
+
+export type CatalogItemsQuery = {
+  q?: string;
+  node_id?: number;
+  source_id?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type CatalogNodesQuery = {
+  parent_id?: number;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
+
 export type Auction = {
   id: number;
   owner: number;
@@ -75,6 +123,7 @@ export type AuctionCreatePayload = {
   end_date: string;
   auction_type: "reverseenglishauction";
   min_bid_decrement: number;
+  lots?: AuctionLotInput[];
 };
 
 export type ApiError = {

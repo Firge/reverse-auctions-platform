@@ -217,3 +217,33 @@ location.reload();
 
 - `docs/RUNBOOK.md` — расширенный runbook / troubleshooting
 - `docs/CLOSED_STATUS_NOTE.md` — зачем нужен статус `CLOSED`
+- `docs/CATALOG_API_FRONTEND_CONTRACT.md` — frontend API-контракт для интеграции каталога лотов
+
+## Прототип API каталога на фронте
+
+Во frontend добавлен прототипный слой API для каталога с двумя режимами:
+
+- `mock`: работает без backend endpoint-ов, возвращает встроенные тестовые данные;
+- `real`: вызывает реальные endpoint-ы (`/api/catalog/...`).
+
+Установить режим можно через env при запуске Vite:
+
+```powershell
+cd frontend
+$env:VITE_CATALOG_API_MODE="mock"
+npm run dev
+```
+
+Для Linux/macOS:
+
+```bash
+cd frontend
+VITE_CATALOG_API_MODE=mock npm run dev
+```
+
+Локально в браузере режим также можно переопределить через `localStorage`:
+
+```js
+localStorage.setItem("bidfall_catalog_api_mode", "mock");
+location.reload();
+```
