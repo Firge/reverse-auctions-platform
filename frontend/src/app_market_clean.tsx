@@ -2,6 +2,9 @@
 import {
   closeAuction,
   createAuction,
+  fetchCatalogItems,
+  fetchCatalogItemsByIds,
+  fetchCatalogNodes,
   fetchCurrentUser,
   fetchActiveAuctions,
   fetchAuction,
@@ -21,11 +24,16 @@ import {
   submitBid,
   updateAuction,
   updateCurrentUser,
+  validateAuctionLots,
 } from "./api";
 import type {
   Auction,
   AuctionCreatePayload,
+  AuctionLot,
+  AuctionLotInput,
   Bid,
+  CatalogItem,
+  CatalogNode,
   CurrentUser,
   CurrentUserUpdatePayload,
   JwtClaims,
@@ -172,6 +180,212 @@ function Tile({
   );
 }
 
+function toLotInputs(lots: AuctionLot[] | undefined): AuctionLotInput[] {
+  if (!lots?.length) return [];
+  return lots.map((lot) => ({
+    id: lot.id,
+    quantity: String(lot.quantity ?? "1"),
+  }));
+}
+
+function LotPicker({
+  selectedLots,
+  onChange,
+  baseUrl,
+  token,
+  disabled,
+}: {
+  selectedLots: AuctionLotInput[];
+  onChange: (lots: AuctionLotInput[]) => void;
+  baseUrl: string;
+  token?: string;
+  disabled?: boolean;
+}) {
+  const [mode, setMode] = useState<"search" | "tree">("search");
+  const [query, setQuery] = useState("");
+  const [nodeId, setNodeId] = useState<number | undefined>(undefined);
+  const [nodes, setNodes] = useState<CatalogNode[]>([]);
+  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedDetails, setSelectedDetails] = useState<Record<number, CatalogItem>>({});
+  const deferredQuery = useDeferredValue(query);
+
+  useEffect(() => {
+    let active = true;
+    const loadNodes = async () => {
+      try {
+        const data = await fetchCatalogNodes({ limit: 200 }, baseUrl, token);
+        if (active) setNodes(data.results);
+      } catch {
+        if (active) setNodes([]);
+      }
+    };
+    void loadNodes();
+    return () => {
+      active = false;
+    };
+  }, [baseUrl, token]);
+
+  useEffect(() => {
+    let active = true;
+    const loadItems = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await fetchCatalogItems(
+          {
+            q: mode === "search" ? deferredQuery.trim() : undefined,
+            node_id: mode === "tree" ? nodeId : undefined,
+            limit: 50,
+          },
+          baseUrl,
+          token,
+        );
+        if (active) setItems(data.results);
+      } catch (err) {
+        if (!active) return;
+        setItems([]);
+        setError((err as Error).message || "Не удалось загрузить каталог");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void loadItems();
+    return () => {
+      active = false;
+    };
+  }, [baseUrl, token, deferredQuery, mode, nodeId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadSelected = async () => {
+      const ids = selectedLots.map((lot) => lot.id);
+      if (!ids.length) {
+        setSelectedDetails({});
+        return;
+      }
+      try {
+        const resolved = await fetchCatalogItemsByIds(ids, baseUrl, token);
+        if (!active) return;
+        const byId: Record<number, CatalogItem> = {};
+        resolved.forEach((item) => {
+          byId[item.id] = item;
+        });
+        setSelectedDetails(byId);
+      } catch {
+        if (active) setSelectedDetails({});
+      }
+    };
+    void loadSelected();
+    return () => {
+      active = false;
+    };
+  }, [selectedLots, baseUrl, token]);
+
+  const selectedIds = useMemo(() => new Set(selectedLots.map((lot) => lot.id)), [selectedLots]);
+
+  function addLot(item: CatalogItem) {
+    if (selectedIds.has(item.id)) return;
+    onChange([
+      ...selectedLots,
+      {
+        id: item.id,
+        quantity: item.default_quantity && item.default_quantity.trim() ? item.default_quantity : "1",
+      },
+    ]);
+  }
+
+  function removeLot(id: number) {
+    onChange(selectedLots.filter((lot) => lot.id !== id));
+  }
+
+  function updateQty(id: number, quantity: string) {
+    onChange(selectedLots.map((lot) => (lot.id === id ? { ...lot, quantity } : lot)));
+  }
+
+  return (
+    <div className="mk-lot-picker">
+      <div className="mk-tabs">
+        <button type="button" className={mode === "search" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("search")}>Поиск</button>
+        <button type="button" className={mode === "tree" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("tree")}>Категория</button>
+      </div>
+
+      {mode === "search" ? (
+        <label className="mk-field-label">Поиск лотов
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Код или наименование"
+            disabled={disabled}
+          />
+        </label>
+      ) : (
+        <label className="mk-field-label">Категория каталога
+          <select
+            value={nodeId ?? ""}
+            onChange={(e) => setNodeId(e.target.value ? Number(e.target.value) : undefined)}
+            disabled={disabled}
+          >
+            <option value="">Все категории</option>
+            {nodes.map((node) => (
+              <option key={node.id} value={node.id}>{node.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {error ? <div className="mk-warning">{error}</div> : null}
+      {loading ? <div className="mk-empty small">Загрузка каталога...</div> : null}
+      {!loading && !items.length ? <div className="mk-empty small">Позиции не найдены.</div> : null}
+      {!!items.length ? (
+        <div className="mk-catalog-items">
+          {items.map((item) => (
+            <div key={item.id} className="mk-catalog-row">
+              <div>
+                <strong>{item.name}</strong>
+                <span>{item.code} · {item.unit}</span>
+              </div>
+              <button type="button" className="mk-ghost" onClick={() => addLot(item)} disabled={disabled || selectedIds.has(item.id)}>
+                {selectedIds.has(item.id) ? "Добавлен" : "Добавить"}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mk-subhead"><span>Выбранные лоты</span><small>{selectedLots.length}</small></div>
+      {!selectedLots.length ? <div className="mk-empty small">Выберите минимум один лот.</div> : null}
+      {!!selectedLots.length ? (
+        <div className="mk-selected-lots">
+          {selectedLots.map((lot) => {
+            const item = selectedDetails[lot.id];
+            return (
+              <div key={lot.id} className="mk-selected-lot-row">
+                <div>
+                  <strong>{item?.name ?? `Позиция #${lot.id}`}</strong>
+                  <span>{item?.code ?? "Код отсутствует"}</span>
+                </div>
+                <div className="mk-selected-lot-controls">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={lot.quantity}
+                    onChange={(e) => updateQty(lot.id, e.target.value)}
+                    disabled={disabled}
+                  />
+                  <button type="button" className="mk-ghost" onClick={() => removeLot(lot.id)} disabled={disabled}>Удалить</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
   const [apiBase] = useState(getStoredApiBase());
@@ -204,6 +418,8 @@ export function App() {
   const [registerForm, setRegisterForm] = useState<RegisterPayload>({ username: "", email: "", password: "", role: "supplier", company_name: "", inn: "" });
   const [authLoading, setAuthLoading] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm>(DEFAULT_CREATE);
+  const [createLots, setCreateLots] = useState<AuctionLotInput[]>([]);
+  const [createLotErrors, setCreateLotErrors] = useState<string[]>([]);
   const [createLoading, setCreateLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [currentUserLoading, setCurrentUserLoading] = useState(false);
@@ -213,6 +429,8 @@ export function App() {
   const [participatingLoading, setParticipatingLoading] = useState(false);
   const [accountForm, setAccountForm] = useState<AccountForm>(DEFAULT_ACCOUNT_FORM);
   const [accountSaving, setAccountSaving] = useState(false);
+  const [draftLots, setDraftLots] = useState<AuctionLotInput[]>([]);
+  const [draftLotErrors, setDraftLotErrors] = useState<string[]>([]);
   const claims = parseClaims(tokens?.access);
   const tokenUserId =
     typeof claims?.user_id === "number"
@@ -353,6 +571,8 @@ export function App() {
   useEffect(() => {
     if (!auction) {
       setDraftEditForm(DEFAULT_DRAFT_EDIT_FORM);
+      setDraftLots([]);
+      setDraftLotErrors([]);
       return;
     }
     setDraftEditForm({
@@ -363,6 +583,8 @@ export function App() {
       start_date_local: auction.start_date ? new Date(auction.start_date).toISOString().slice(0, 16) : "",
       end_date_local: auction.end_date ? new Date(auction.end_date).toISOString().slice(0, 16) : "",
     });
+    setDraftLots(toLotInputs(auction.lots));
+    setDraftLotErrors([]);
   }, [auction?.id, auction?.title, auction?.description, auction?.start_price, auction?.start_date, auction?.end_date, auction?.specific?.min_bid_decrement]);
   useEffect(() => { if (!selectedId) return; startTransition(() => { void loadAuction(selectedId); }); }, [selectedId, apiBase]);
   useEffect(() => { if (route.name === "auction" && detailTab === "bids" && selectedId) void loadBids(selectedId); }, [route, detailTab, selectedId, apiBase, tokens?.access]);
@@ -391,6 +613,13 @@ export function App() {
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     if (!tokens?.access) { setToast({ kind: "error", text: "Сначала войдите в аккаунт, чтобы создать аукцион." }); return; }
+    const lotsValidation = validateAuctionLots(createLots);
+    if (lotsValidation.errors.length) {
+      setCreateLotErrors(lotsValidation.errors);
+      setToast({ kind: "error", text: lotsValidation.errors[0] });
+      return;
+    }
+    setCreateLotErrors([]);
     const payload: AuctionCreatePayload = {
       title: createForm.title,
       description: createForm.description,
@@ -399,9 +628,10 @@ export function App() {
       end_date: new Date(createForm.end_date_local).toISOString(),
       auction_type: "reverseenglishauction",
       min_bid_decrement: Number(createForm.min_bid_decrement),
+      lots: lotsValidation.normalizedLots,
     };
     setCreateLoading(true);
-    try { const created = normalizeAuction(await createAuction(payload, tokens.access, apiBase)); setCreateForm(DEFAULT_CREATE); setToast({ kind: "ok", text: `Аукцион создан.` }); await refreshAuctions(); await loadOwnedAuctions(tokens.access); openAuction(created.id); }
+    try { const created = normalizeAuction(await createAuction(payload, tokens.access, apiBase)); setCreateForm(DEFAULT_CREATE); setCreateLots([]); setToast({ kind: "ok", text: `Аукцион создан.` }); await refreshAuctions(); await loadOwnedAuctions(tokens.access); openAuction(created.id); }
     catch (err) { setToast({ kind: "error", text: `Ошибка создания: ${(err as Error).message}` }); }
     finally { setCreateLoading(false); }
   }
@@ -444,6 +674,13 @@ export function App() {
       setToast({ kind: "error", text: "Сначала войдите в аккаунт." });
       return;
     }
+    const lotsValidation = validateAuctionLots(draftLots);
+    if (lotsValidation.errors.length) {
+      setDraftLotErrors(lotsValidation.errors);
+      setToast({ kind: "error", text: lotsValidation.errors[0] });
+      return;
+    }
+    setDraftLotErrors([]);
     setDraftEditLoading(true);
     try {
       const updated = await updateAuction(
@@ -456,6 +693,7 @@ export function App() {
           end_date: new Date(draftEditForm.end_date_local).toISOString(),
           auction_type: "reverseenglishauction",
           min_bid_decrement: Number(draftEditForm.min_bid_decrement),
+          lots: lotsValidation.normalizedLots,
         },
         tokens.access,
         apiBase,
@@ -474,6 +712,12 @@ export function App() {
   async function onPublish() {
     if (!auction || !tokens?.access) {
       setToast({ kind: "error", text: "Сначала войдите в аккаунт." });
+      return;
+    }
+    const lotsValidation = validateAuctionLots(draftLots);
+    if (lotsValidation.errors.length) {
+      setDraftLotErrors(lotsValidation.errors);
+      setToast({ kind: "error", text: "Перед публикацией добавьте минимум один лот." });
       return;
     }
     setDraftEditLoading(true);
@@ -529,7 +773,7 @@ export function App() {
 
       {route.name === "browse" ? <div className="mk-page-grid"><aside className="mk-page-sidebar"><Card title="Фильтры" subtitle="Параметры отображения списка аукционов."><div className="mk-filter-block"><div className="mk-tabs"><button type="button" className={catalogMode === "all" ? "mk-tab active" : "mk-tab"} onClick={() => setCatalogMode("all")}>Все</button><button type="button" className={catalogMode === "active" ? "mk-tab active" : "mk-tab"} onClick={() => setCatalogMode("active")}>Идут сейчас</button></div><label className="mk-field-label">Поиск<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Название аукциона, статус, ID" /></label><div className="mk-note">{filtered.length} объявлений</div></div></Card></aside><section className="mk-page-content"><Card title="Список аукционов" subtitle="Просмотр всех аукционов в формате витрины." action={loadingAuctions ? <small className="mk-inline-muted">Обновление...</small> : undefined}>{loadingAuctions && !filtered.length ? <div className="mk-empty">Загрузка аукционов...</div> : null}{!loadingAuctions && !filtered.length ? <div className="mk-empty">По вашему запросу ничего не найдено.</div> : null}{!!filtered.length ? <div className="mk-grid mk-grid-market">{filtered.map((a) => <Tile key={a.id} a={a} nowMs={serverNowMs} open={() => openAuction(a.id)} />)}</div> : null}</Card></section></div> : null}
 
-      {route.name === "auction" ? <div className="mk-detail-layout"><section className="mk-detail-main"><Card title={auction?.title || "Аукцион"} subtitle={auction ? `Активный аукцион` : "Выберите аукцион из списка."} action={auction ? <Status s={auction.status} /> : undefined}>{loadingAuction ? <div className="mk-empty">Загрузка аукциона...</div> : null}{!loadingAuction && !auction ? <div className="mk-empty">Аукцион не найден.</div> : null}{auction ? <div className="mk-detail"><div className="mk-product-hero"><div className="mk-product-gallery" aria-hidden="true"><div className="mk-product-gallery-main">{(auction.title || "А")[0].toUpperCase()}</div><div className="mk-product-gallery-row"><span /><span /><span /></div></div><div className="mk-product-summary"><p className="mk-product-copy">{auction.description || "Описание отсутствует."}</p><div className="mk-detail-stats"><div><small>Текущая цена</small><strong>{money(auction.current_price ?? auction.start_price)}</strong></div><div><small>Начальная цена</small><strong>{money(auction.start_price)}</strong></div><div><small>До окончания</small><strong>{timeLeft(auction.end_date, serverNowMs)}</strong></div><div><small>Мин. шаг снижения</small><strong>{auction.specific?.min_bid_decrement ?? "-"}</strong></div></div><div className="mk-meta-list"><span>Начало: {dateText(auction.start_date)}</span><span>Окончание: {dateText(auction.end_date)}</span><span>Продавец</span></div></div></div><div className="mk-tabs compact mk-segmented"><button type="button" className={detailTab === "overview" ? "mk-tab active" : "mk-tab"} onClick={() => setDetailTab("overview")}>Обзор</button><button type="button" className={detailTab === "bids" ? "mk-tab active" : "mk-tab"} onClick={() => { setDetailTab("bids"); void loadBids(auction.id); }}>Ставки</button></div>{detailTab === "overview" ? <div className="mk-lots"><div className="mk-subhead"><span>Лоты</span><small>{auction.lots?.length ?? 0}</small></div>{(auction.lots ?? []).map((lot) => <div key={`${lot.id}-${lot.code}`} className="mk-lot-row"><div><strong>{lot.name}</strong><span>{lot.code || "Позиция"}</span></div><div><strong>{lot.quantity}</strong><span>{lot.unit}</span></div></div>)}{!auction.lots?.length ? <div className="mk-empty small">Лоты пока не добавлены.</div> : null}</div> : <div className="mk-bids">{bidsMsg ? <div className="mk-warning">{bidsMsg}</div> : null}{loadingBids ? <div className="mk-empty small">Загрузка ставок...</div> : null}{!loadingBids && bids.map((b) => <div key={b.id} className="mk-bid-row"><div><strong>{money(b.bid)}</strong><span>Поставщик</span></div><p>{b.comment || "Без комментария"}</p></div>)}{!loadingBids && !bids.length && !bidsMsg ? <div className="mk-empty small">Ставок пока нет.</div> : null}</div>}</div> : null}</Card></section><aside className="mk-detail-side"><Card title={isOwnerDraft ? "Редактирование черновика" : "Сделать ставку"} subtitle={isOwnerDraft ? "Редактировать можно только черновики. Когда все готово, опубликуйте аукцион." : "Отправьте новую ставку для этого аукциона."}>{!auction ? <div className="mk-empty small">Сначала выберите аукцион.</div> : isOwnerDraft ? <div className="mk-form"><div className="mk-form-grid"><label className="mk-field-label">Название<input value={draftEditForm.title} onChange={(e) => setDraftEditForm((f) => ({ ...f, title: e.target.value }))} /></label><label className="mk-field-label">Начальная цена<input type="number" step="0.01" value={draftEditForm.start_price} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_price: e.target.value }))} /></label><label className="mk-field-label">Время начала<input type="datetime-local" value={draftEditForm.start_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_date_local: e.target.value }))} /></label><label className="mk-field-label">Время окончания<input type="datetime-local" value={draftEditForm.end_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, end_date_local: e.target.value }))} /></label><label className="mk-field-label">Мин. шаг снижения<input type="number" step="0.01" value={draftEditForm.min_bid_decrement} onChange={(e) => setDraftEditForm((f) => ({ ...f, min_bid_decrement: e.target.value }))} /></label></div><label className="mk-field-label">Описание<textarea rows={4} value={draftEditForm.description} onChange={(e) => setDraftEditForm((f) => ({ ...f, description: e.target.value }))} /></label><div className="mk-inline-actions"><button type="button" disabled={draftEditLoading} onClick={onSaveDraft}>{draftEditLoading ? "Сохранение..." : "Сохранить черновик"}</button><button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={onPublish}>{draftEditLoading ? "Подождите..." : "Опубликовать"}</button>{canOwnerCloseAuction ? <button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={() => void onCloseAuction()}>{draftEditLoading ? "Подождите..." : "Закрыть аукцион"}</button> : null}</div></div> : isAuctionOwner ? <div className="mk-empty small">Этот аукцион уже опубликован. Владелец не может редактировать его или делать ставки.</div> : !tokens?.access ? <div className="mk-empty small">Войдите как поставщик, чтобы делать ставки.</div> : !canBidByRole ? <div className="mk-empty small">Ставки в этом аукционе могут делать только поставщики.</div> : auction.status !== "ACTIVE" ? <div className="mk-empty small">Прием ставок начнется, когда аукцион станет активным.</div> : <form className="mk-form" onSubmit={onBid}><label className="mk-field-label">Цена ставки (чем ниже, тем лучше)<input type="number" step="0.01" min="0" value={bidForm.bid_amount} onChange={(e) => setBidForm((f) => ({ ...f, bid_amount: e.target.value }))} placeholder="Введите более низкую цену" /></label><label className="mk-field-label">Комментарий (необязательно)<input value={bidForm.comment} onChange={(e) => setBidForm((f) => ({ ...f, comment: e.target.value }))} placeholder="Срок поставки, примечания" /></label><div className="mk-inline-actions"><button type="submit" disabled={bidLoading}>{bidLoading ? "Отправка..." : "Отправить ставку"}</button><button type="button" className="mk-ghost" onClick={() => void loadBids(auction.id)}>Обновить ставки</button><button type="button" className="mk-ghost" onClick={() => void loadWinner(auction.id)}>Проверить победителя</button></div>{(loadingWinner || winner || winnerMsg) ? <div className="mk-winner-box">{loadingWinner ? <span>Проверка победителя...</span> : null}{winner ? <span>Текущий победитель: {money(winner.bid)}</span> : null}{!winner && winnerMsg ? <span>{winnerMsg}</span> : null}</div> : null}</form>}</Card>{isAuctionOwner && !isOwnerDraft && canOwnerCloseAuction ? <Card title="Действия владельца" subtitle="Управление статусом аукциона."><div className="mk-inline-actions"><button type="button" className="mk-ghost" onClick={() => void onCloseAuction()}>Закрыть аукцион</button></div></Card> : null}<Card title="Другие аукционы" subtitle="Откройте другой активный или недавний аукцион."><div className="mk-list-rows">{(activeAuctions.length ? activeAuctions : allAuctions).slice(0, 6).map((a) => <button key={a.id} type="button" className="mk-row-link" onClick={() => openAuction(a.id)}><div><strong>{a.title}</strong><span>{statusText(a.status)}</span></div><div><strong>{money(a.current_price ?? a.start_price)}</strong><span>{timeLeft(a.end_date, serverNowMs)}</span></div></button>)}{!(activeAuctions.length || allAuctions.length) ? <div className="mk-empty small">Нет доступных аукционов.</div> : null}</div></Card></aside></div> : null}
+      {route.name === "auction" ? <div className="mk-detail-layout"><section className="mk-detail-main"><Card title={auction?.title || "Аукцион"} subtitle={auction ? `Активный аукцион` : "Выберите аукцион из списка."} action={auction ? <Status s={auction.status} /> : undefined}>{loadingAuction ? <div className="mk-empty">Загрузка аукциона...</div> : null}{!loadingAuction && !auction ? <div className="mk-empty">Аукцион не найден.</div> : null}{auction ? <div className="mk-detail"><div className="mk-product-hero"><div className="mk-product-gallery" aria-hidden="true"><div className="mk-product-gallery-main">{(auction.title || "А")[0].toUpperCase()}</div><div className="mk-product-gallery-row"><span /><span /><span /></div></div><div className="mk-product-summary"><p className="mk-product-copy">{auction.description || "Описание отсутствует."}</p><div className="mk-detail-stats"><div><small>Текущая цена</small><strong>{money(auction.current_price ?? auction.start_price)}</strong></div><div><small>Начальная цена</small><strong>{money(auction.start_price)}</strong></div><div><small>До окончания</small><strong>{timeLeft(auction.end_date, serverNowMs)}</strong></div><div><small>Мин. шаг снижения</small><strong>{auction.specific?.min_bid_decrement ?? "-"}</strong></div></div><div className="mk-meta-list"><span>Начало: {dateText(auction.start_date)}</span><span>Окончание: {dateText(auction.end_date)}</span><span>Продавец</span></div></div></div><div className="mk-tabs compact mk-segmented"><button type="button" className={detailTab === "overview" ? "mk-tab active" : "mk-tab"} onClick={() => setDetailTab("overview")}>Обзор</button><button type="button" className={detailTab === "bids" ? "mk-tab active" : "mk-tab"} onClick={() => { setDetailTab("bids"); void loadBids(auction.id); }}>Ставки</button></div>{detailTab === "overview" ? <div className="mk-lots"><div className="mk-subhead"><span>Лоты</span><small>{auction.lots?.length ?? 0}</small></div>{(auction.lots ?? []).map((lot) => <div key={`${lot.id}-${lot.code}`} className="mk-lot-row"><div><strong>{lot.name}</strong><span>{lot.code || "Позиция"}</span></div><div><strong>{lot.quantity}</strong><span>{lot.unit}</span></div></div>)}{!auction.lots?.length ? <div className="mk-empty small">Лоты пока не добавлены.</div> : null}</div> : <div className="mk-bids">{bidsMsg ? <div className="mk-warning">{bidsMsg}</div> : null}{loadingBids ? <div className="mk-empty small">Загрузка ставок...</div> : null}{!loadingBids && bids.map((b) => <div key={b.id} className="mk-bid-row"><div><strong>{money(b.bid)}</strong><span>Поставщик</span></div><p>{b.comment || "Без комментария"}</p></div>)}{!loadingBids && !bids.length && !bidsMsg ? <div className="mk-empty small">Ставок пока нет.</div> : null}</div>}</div> : null}</Card></section><aside className="mk-detail-side"><Card title={isOwnerDraft ? "Редактирование черновика" : "Сделать ставку"} subtitle={isOwnerDraft ? "Редактировать можно только черновики. Когда все готово, опубликуйте аукцион." : "Отправьте новую ставку для этого аукциона."}>{!auction ? <div className="mk-empty small">Сначала выберите аукцион.</div> : isOwnerDraft ? <div className="mk-form"><div className="mk-form-grid"><label className="mk-field-label">Название<input value={draftEditForm.title} onChange={(e) => setDraftEditForm((f) => ({ ...f, title: e.target.value }))} /></label><label className="mk-field-label">Начальная цена<input type="number" step="0.01" value={draftEditForm.start_price} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_price: e.target.value }))} /></label><label className="mk-field-label">Время начала<input type="datetime-local" value={draftEditForm.start_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_date_local: e.target.value }))} /></label><label className="mk-field-label">Время окончания<input type="datetime-local" value={draftEditForm.end_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, end_date_local: e.target.value }))} /></label><label className="mk-field-label">Мин. шаг снижения<input type="number" step="0.01" value={draftEditForm.min_bid_decrement} onChange={(e) => setDraftEditForm((f) => ({ ...f, min_bid_decrement: e.target.value }))} /></label></div><label className="mk-field-label">Описание<textarea rows={4} value={draftEditForm.description} onChange={(e) => setDraftEditForm((f) => ({ ...f, description: e.target.value }))} /></label><LotPicker selectedLots={draftLots} onChange={setDraftLots} baseUrl={apiBase} token={tokens?.access ?? undefined} disabled={draftEditLoading} />{draftLotErrors.length ? <div className="mk-warning">{draftLotErrors.join("; ")}</div> : null}<div className="mk-inline-actions"><button type="button" disabled={draftEditLoading} onClick={onSaveDraft}>{draftEditLoading ? "Сохранение..." : "Сохранить черновик"}</button><button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={onPublish}>{draftEditLoading ? "Подождите..." : "Опубликовать"}</button>{canOwnerCloseAuction ? <button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={() => void onCloseAuction()}>{draftEditLoading ? "Подождите..." : "Закрыть аукцион"}</button> : null}</div></div> : isAuctionOwner ? <div className="mk-empty small">Этот аукцион уже опубликован. Владелец не может редактировать его или делать ставки.</div> : !tokens?.access ? <div className="mk-empty small">Войдите как поставщик, чтобы делать ставки.</div> : !canBidByRole ? <div className="mk-empty small">Ставки в этом аукционе могут делать только поставщики.</div> : auction.status !== "ACTIVE" ? <div className="mk-empty small">Прием ставок начнется, когда аукцион станет активным.</div> : <form className="mk-form" onSubmit={onBid}><label className="mk-field-label">Цена ставки (чем ниже, тем лучше)<input type="number" step="0.01" min="0" value={bidForm.bid_amount} onChange={(e) => setBidForm((f) => ({ ...f, bid_amount: e.target.value }))} placeholder="Введите более низкую цену" /></label><label className="mk-field-label">Комментарий (необязательно)<input value={bidForm.comment} onChange={(e) => setBidForm((f) => ({ ...f, comment: e.target.value }))} placeholder="Срок поставки, примечания" /></label><div className="mk-inline-actions"><button type="submit" disabled={bidLoading}>{bidLoading ? "Отправка..." : "Отправить ставку"}</button><button type="button" className="mk-ghost" onClick={() => void loadBids(auction.id)}>Обновить ставки</button><button type="button" className="mk-ghost" onClick={() => void loadWinner(auction.id)}>Проверить победителя</button></div>{(loadingWinner || winner || winnerMsg) ? <div className="mk-winner-box">{loadingWinner ? <span>Проверка победителя...</span> : null}{winner ? <span>Текущий победитель: {money(winner.bid)}</span> : null}{!winner && winnerMsg ? <span>{winnerMsg}</span> : null}</div> : null}</form>}</Card>{isAuctionOwner && !isOwnerDraft && canOwnerCloseAuction ? <Card title="Действия владельца" subtitle="Управление статусом аукциона."><div className="mk-inline-actions"><button type="button" className="mk-ghost" onClick={() => void onCloseAuction()}>Закрыть аукцион</button></div></Card> : null}<Card title="Другие аукционы" subtitle="Откройте другой активный или недавний аукцион."><div className="mk-list-rows">{(activeAuctions.length ? activeAuctions : allAuctions).slice(0, 6).map((a) => <button key={a.id} type="button" className="mk-row-link" onClick={() => openAuction(a.id)}><div><strong>{a.title}</strong><span>{statusText(a.status)}</span></div><div><strong>{money(a.current_price ?? a.start_price)}</strong><span>{timeLeft(a.end_date, serverNowMs)}</span></div></button>)}{!(activeAuctions.length || allAuctions.length) ? <div className="mk-empty small">Нет доступных аукционов.</div> : null}</div></Card></aside></div> : null}
 
       {route.name === "sell" ? (
         <div className="mk-create-page-full">
@@ -553,6 +797,8 @@ export function App() {
                   <label className="mk-field-label">Тип аукциона<input value="Реверсный аукцион" readOnly /></label>
                 </div>
                 <label className="mk-field-label">Описание<textarea rows={4} value={createForm.description} onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))} placeholder="Условия поставки, требования к участникам, комментарии" /></label>
+                <LotPicker selectedLots={createLots} onChange={setCreateLots} baseUrl={apiBase} token={tokens?.access ?? undefined} disabled={createLoading} />
+                {createLotErrors.length ? <div className="mk-warning">{createLotErrors.join("; ")}</div> : null}
                 <div className="mk-inline-actions">
                   <button type="submit" disabled={createLoading}>{createLoading ? "Сохранение..." : "Создать аукцион"}</button>
                   <button type="button" className="mk-ghost" onClick={() => setCreateForm(DEFAULT_CREATE)}>Сбросить форму</button>

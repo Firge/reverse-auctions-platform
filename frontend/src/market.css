@@ -1012,6 +1012,52 @@ button:disabled {
   line-height: 1.35;
 }
 
+.mk-lot-picker {
+  border: 1px solid var(--mk-border);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: #fff;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.mk-catalog-items,
+.mk-selected-lots {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.mk-catalog-row,
+.mk-selected-lot-row {
+  border: 1px solid var(--mk-border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.55rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.mk-catalog-row > div,
+.mk-selected-lot-row > div {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.mk-catalog-row span,
+.mk-selected-lot-row span {
+  color: var(--mk-muted);
+  font-size: 0.8rem;
+}
+
+.mk-selected-lot-controls {
+  display: grid;
+  grid-template-columns: 120px auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
 @media (max-width: 1180px) {
   .mk-home-split,
   .mk-page-grid,
@@ -1028,6 +1074,11 @@ button:disabled {
 
   .mk-account-grid-profile {
     grid-template-columns: 1fr;
+  }
+
+  .mk-selected-lot-controls {
+    grid-template-columns: 1fr;
+    width: 100%;
   }
 
   .mk-row-link {
