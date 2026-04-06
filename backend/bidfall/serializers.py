@@ -233,7 +233,6 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
             if not CatalogItem.objects.filter(id=lot_id).exists():
                 raise serializers.ValidationError(f"Catalog item with id {lot_id} does not exist")
             validated_lots.append({'id': lot_id, 'quantity': quantity})
-            return validated_lots
 
         return validated_lots
 
