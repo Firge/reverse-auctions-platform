@@ -102,9 +102,7 @@ jobs:
               while IFS= read -r path; do
                 [ -z "$path" ] && continue
                 mark_from_path "$path"
-              done <<EOF
-$changed_files
-EOF
+              done <<< "$changed_files"
             fi
           elif [ "$requested_services" = "all" ]; then
             backend_changed=true
