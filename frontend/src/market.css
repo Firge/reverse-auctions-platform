@@ -1019,6 +1019,32 @@ button:disabled {
   background: #fff;
   display: grid;
   gap: 0.55rem;
+  position: relative;
+}
+
+.mk-lot-picker-floating-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 50;
+}
+
+.mk-lot-picker-floating {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(920px, calc(100vw - 2rem));
+  max-height: min(78vh, 860px);
+  overflow: auto;
+  border: 1px solid var(--mk-border);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.8rem;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.28);
+  z-index: 60;
+  display: grid;
+  gap: 0.6rem;
 }
 
 .mk-catalog-items,
@@ -1083,5 +1109,11 @@ button:disabled {
 
   .mk-row-link {
     grid-template-columns: 1fr;
+  }
+
+  .mk-lot-picker-floating {
+    width: calc(100vw - 1rem);
+    max-height: 86vh;
+    padding: 0.7rem;
   }
 }

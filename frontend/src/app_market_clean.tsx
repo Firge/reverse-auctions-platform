@@ -210,6 +210,7 @@ function LotPicker({
   const [error, setError] = useState("");
   const [selectedDetails, setSelectedDetails] = useState<Record<number, CatalogItem>>({});
   const deferredQuery = useDeferredValue(query);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -284,6 +285,10 @@ function LotPicker({
   }, [selectedLots, baseUrl, token]);
 
   const selectedIds = useMemo(() => new Set(selectedLots.map((lot) => lot.id)), [selectedLots]);
+  const selectableNodes = useMemo(
+    () => nodes.filter((node) => !node.has_children || node.items_count > 0),
+    [nodes],
+  );
 
   function addLot(item: CatalogItem) {
     if (selectedIds.has(item.id)) return;
@@ -306,52 +311,79 @@ function LotPicker({
 
   return (
     <div className="mk-lot-picker">
-      <div className="mk-tabs">
-        <button type="button" className={mode === "search" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("search")}>Поиск</button>
-        <button type="button" className={mode === "tree" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("tree")}>Категория</button>
+      <div className="mk-subhead">
+        <span>Каталог строительных материалов</span>
+        <button
+          type="button"
+          className="mk-ghost"
+          onClick={() => setCatalogOpen((value) => !value)}
+          disabled={disabled}
+        >
+          {catalogOpen ? "Скрыть каталог" : "Открыть каталог"}
+        </button>
       </div>
 
-      {mode === "search" ? (
-        <label className="mk-field-label">Поиск лотов
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Код или наименование"
-            disabled={disabled}
-          />
-        </label>
-      ) : (
-        <label className="mk-field-label">Категория каталога
-          <select
-            value={nodeId ?? ""}
-            onChange={(e) => setNodeId(e.target.value ? Number(e.target.value) : undefined)}
-            disabled={disabled}
-          >
-            <option value="">Все категории</option>
-            {nodes.map((node) => (
-              <option key={node.id} value={node.id}>{node.name}</option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      {error ? <div className="mk-warning">{error}</div> : null}
-      {loading ? <div className="mk-empty small">Загрузка каталога...</div> : null}
-      {!loading && !items.length ? <div className="mk-empty small">Позиции не найдены.</div> : null}
-      {!!items.length ? (
-        <div className="mk-catalog-items">
-          {items.map((item) => (
-            <div key={item.id} className="mk-catalog-row">
-              <div>
-                <strong>{item.name}</strong>
-                <span>{item.code} · {item.unit}</span>
-              </div>
-              <button type="button" className="mk-ghost" onClick={() => addLot(item)} disabled={disabled || selectedIds.has(item.id)}>
-                {selectedIds.has(item.id) ? "Добавлен" : "Добавить"}
-              </button>
+      {catalogOpen ? (
+        <>
+          <div className="mk-lot-picker-floating-backdrop" onClick={() => setCatalogOpen(false)} />
+          <div className="mk-lot-picker-floating" role="dialog" aria-modal="true" aria-label="Каталог лотов">
+            <div className="mk-subhead">
+              <span>Подбор лотов</span>
+              <button type="button" className="mk-ghost" onClick={() => setCatalogOpen(false)}>Закрыть</button>
             </div>
-          ))}
-        </div>
+            <div className="mk-tabs">
+              <button type="button" className={mode === "search" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("search")}>Поиск</button>
+              <button type="button" className={mode === "tree" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("tree")}>Категория</button>
+            </div>
+
+            {mode === "search" ? (
+              <label className="mk-field-label">Поиск лотов
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Код или наименование"
+                  disabled={disabled}
+                />
+              </label>
+            ) : (
+              <label className="mk-field-label">Категория каталога
+                <select
+                  value={nodeId ?? ""}
+                  onChange={(e) => setNodeId(e.target.value ? Number(e.target.value) : undefined)}
+                  disabled={disabled}
+                >
+                  <option value="">Все конечные категории</option>
+                  {selectableNodes.map((node) => (
+                    <option key={node.id} value={node.id}>{node.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {mode === "tree" && nodeId !== undefined && !items.length && !loading && !error ? (
+              <div className="mk-note">Для выбранной категории нет прямых позиций. Попробуйте другую конечную категорию.</div>
+            ) : null}
+
+            {error ? <div className="mk-warning">{error}</div> : null}
+            {loading ? <div className="mk-empty small">Загрузка каталога...</div> : null}
+            {!loading && !items.length ? <div className="mk-empty small">Позиции не найдены.</div> : null}
+            {!!items.length ? (
+              <div className="mk-catalog-items">
+                {items.map((item) => (
+                  <div key={item.id} className="mk-catalog-row">
+                    <div>
+                      <strong>{item.name}</strong>
+                      <span>{item.code} · {item.unit}</span>
+                    </div>
+                    <button type="button" className="mk-ghost" onClick={() => addLot(item)} disabled={disabled || selectedIds.has(item.id)}>
+                      {selectedIds.has(item.id) ? "Добавлен" : "Добавить"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </>
       ) : null}
 
       <div className="mk-subhead"><span>Выбранные лоты</span><small>{selectedLots.length}</small></div>

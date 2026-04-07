@@ -23,6 +23,8 @@ const CATALOG_API_MODE_KEY = "bidfall_catalog_api_mode";
 
 export type CatalogApiMode = "mock" | "real";
 
+type MaybePaginated<T> = T[] | { results?: T[] | null } | null | undefined;
+
 const MOCK_CATALOG_NODES: CatalogNode[] = [
   { id: 1, name: "Строительство", parent_id: null, has_children: true, items_count: 0 },
   { id: 2, name: "Материалы", parent_id: 1, has_children: true, items_count: 0 },
@@ -184,6 +186,15 @@ async function request<T>(
   }
 }
 
+function normalizeListPayload<T>(payload: MaybePaginated<T>): T[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    const results = (payload as { results?: unknown }).results;
+    if (Array.isArray(results)) return results as T[];
+  }
+  return [];
+}
+
 function shouldFallbackToSameOrigin(error: unknown) {
   if (!(error instanceof Error)) return false;
   const status = (error as Error & { status?: number }).status;
@@ -214,11 +225,13 @@ export async function loginUser(
 }
 
 export async function fetchActiveAuctions(baseUrl?: string) {
-  return request<Auction[]>("/api/auctions/active/", { method: "GET", baseUrl });
+  const data = await request<MaybePaginated<Auction>>("/api/auctions/active/", { method: "GET", baseUrl });
+  return normalizeListPayload(data);
 }
 
 export async function fetchAuctions(baseUrl?: string, token?: string) {
-  return request<Auction[]>("/api/auctions/", { method: "GET", baseUrl, token });
+  const data = await request<MaybePaginated<Auction>>("/api/auctions/", { method: "GET", baseUrl, token });
+  return normalizeListPayload(data);
 }
 
 export async function fetchAuction(id: number, baseUrl?: string, token?: string) {
