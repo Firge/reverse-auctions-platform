@@ -17,15 +17,47 @@ This project has a Django backend (`backend/`) and a Vite+React frontend (`front
 
 ## CI/CD Artifacts (GHCR)
 
-On every push to `main`, GitHub Actions builds and pushes three images:
+GitHub Actions builds images selectively by changed paths.
 
-- `ghcr.io/<owner>/<repo>/backend:<sha>` and `latest`
-- `ghcr.io/<owner>/<repo>/frontend:<sha>` and `latest`
-- `ghcr.io/<owner>/<repo>/tools:<sha>` and `latest`
+Build targets:
+
+- `backend`
+- `frontend`
+- `tools`
+- `smtp-worker`
+- `smtp-relay`
+
+Path mapping:
+
+- `backend/**` -> `backend`
+- `frontend/**` -> `frontend`
+- `tools/**` or `Dockerfile.tools` -> `tools`
+- `smtp/service/**` -> `smtp-worker`
+- `smtp/postfix/**` -> `smtp-relay`
+
+Triggers:
+
+- `push` to `main`: changed targets are built and pushed to GHCR
+- `pull_request` to `main`: changed targets are built (without push)
+
+Production deploy is also selective:
+
+- backend image change -> `web`, `celery_worker`, `celery_beat`
+- frontend image change -> `frontend`
+- smtp-worker image change -> `email_worker`
+- smtp-relay image change -> `postfix_relay` and `email_worker`
+- tools change -> `init-catalog` check/run
+
+Manual deploy via `workflow_dispatch` supports:
+
+- `image_tag` (default: `latest`)
+- `services` (`auto`, `all`, or CSV: `backend,frontend,smtp-worker`)
+- `run_init_catalog` (`true`/`false`)
 
 Workflow and build definition:
 
 - `.github/workflows/docker-image.yml`
+- `.github/workflows/deploy-prod.yml`
 - `docker-compose.build.hcl`
 
 ### Run Production Image Stack

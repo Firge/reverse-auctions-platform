@@ -11,6 +11,15 @@ on:
         description: "Image tag to deploy (for example: latest or commit SHA)"
         required: false
         default: "latest"
+      services:
+        description: "Services to deploy: auto, all, or CSV list (backend,frontend,tools,smtp-worker,smtp-relay)"
+        required: false
+        default: "auto"
+      run_init_catalog:
+        description: "Force run init-catalog"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -33,27 +42,177 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine deployment scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SERVICES: ${{ github.event.inputs.services }}
+          DISPATCH_RUN_INIT: ${{ github.event.inputs.run_init_catalog }}
+        run: |
+          set -euo pipefail
+
+          add_csv_item() {
+            local current="$1"
+            local item="$2"
+            if [ -z "$current" ]; then
+              printf "%s" "$item"
+              return
+            fi
+            case ",$current," in
+              *",$item,"*) printf "%s" "$current" ;;
+              *) printf "%s,%s" "$current" "$item" ;;
+            esac
+          }
+
+          mark_from_path() {
+            local path="$1"
+            case "$path" in
+              backend/*) backend_changed=true ;;
+              frontend/*) frontend_changed=true ;;
+              tools/*|Dockerfile.tools) tools_changed=true ;;
+              smtp/service/*) smtp_worker_changed=true ;;
+              smtp/postfix/*) smtp_relay_changed=true ;;
+            esac
+          }
+
+          backend_changed=false
+          frontend_changed=false
+          tools_changed=false
+          smtp_worker_changed=false
+          smtp_relay_changed=false
+
+          target_sha="${WORKFLOW_HEAD_SHA:-$GITHUB_SHA}"
+          requested_services="${DISPATCH_SERVICES:-auto}"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -z "$requested_services" ]; then
+              requested_services="auto"
+            fi
+          else
+            requested_services="auto"
+          fi
+
+          if [ "$requested_services" = "auto" ]; then
+            changed_files="$(git show --name-only --pretty='' "$target_sha" || true)"
+            if [ -n "$changed_files" ]; then
+              while IFS= read -r path; do
+                [ -z "$path" ] && continue
+                mark_from_path "$path"
+              done <<EOF
+$changed_files
+EOF
+            fi
+          elif [ "$requested_services" = "all" ]; then
+            backend_changed=true
+            frontend_changed=true
+            tools_changed=true
+            smtp_worker_changed=true
+            smtp_relay_changed=true
+          else
+            csv="${requested_services// /}"
+            IFS=',' read -r -a selected <<< "$csv"
+            for item in "${selected[@]}"; do
+              case "$item" in
+                backend) backend_changed=true ;;
+                frontend) frontend_changed=true ;;
+                tools) tools_changed=true ;;
+                smtp-worker|smtp_worker) smtp_worker_changed=true ;;
+                smtp-relay|smtp_relay) smtp_relay_changed=true ;;
+                '') ;;
+                *)
+                  echo "Unknown service in workflow_dispatch input: $item"
+                  exit 1
+                  ;;
+              esac
+            done
+          fi
+
+          changed_images=""
+          compose_services=""
+
+          if [ "$backend_changed" = true ]; then
+            changed_images="$(add_csv_item "$changed_images" "backend")"
+            compose_services="$(add_csv_item "$compose_services" "web")"
+            compose_services="$(add_csv_item "$compose_services" "celery_worker")"
+            compose_services="$(add_csv_item "$compose_services" "celery_beat")"
+          fi
+
+          if [ "$frontend_changed" = true ]; then
+            changed_images="$(add_csv_item "$changed_images" "frontend")"
+            compose_services="$(add_csv_item "$compose_services" "frontend")"
+          fi
+
+          if [ "$smtp_worker_changed" = true ]; then
+            changed_images="$(add_csv_item "$changed_images" "smtp-worker")"
+            compose_services="$(add_csv_item "$compose_services" "email_worker")"
+          fi
+
+          if [ "$smtp_relay_changed" = true ]; then
+            changed_images="$(add_csv_item "$changed_images" "smtp-relay")"
+            compose_services="$(add_csv_item "$compose_services" "postfix_relay")"
+            compose_services="$(add_csv_item "$compose_services" "email_worker")"
+          fi
+
+          run_init_catalog=false
+          if [ "$tools_changed" = true ]; then
+            changed_images="$(add_csv_item "$changed_images" "tools")"
+            run_init_catalog=true
+          fi
+          if [ "${DISPATCH_RUN_INIT:-false}" = "true" ]; then
+            run_init_catalog=true
+          fi
+
+          deploy_needed=false
+          if [ -n "$compose_services" ] || [ "$run_init_catalog" = true ]; then
+            deploy_needed=true
+          fi
+
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "changed_images=$changed_images" >> "$GITHUB_OUTPUT"
+          echo "compose_services=$compose_services" >> "$GITHUB_OUTPUT"
+          echo "run_init_catalog=$run_init_catalog" >> "$GITHUB_OUTPUT"
+          echo "deploy_needed=$deploy_needed" >> "$GITHUB_OUTPUT"
+
+      - name: Deployment summary
+        run: |
+          echo "target sha: ${{ steps.scope.outputs.target_sha }}"
+          echo "changed images: ${{ steps.scope.outputs.changed_images }}"
+          echo "compose services: ${{ steps.scope.outputs.compose_services }}"
+          echo "run init-catalog: ${{ steps.scope.outputs.run_init_catalog }}"
+          echo "deploy needed: ${{ steps.scope.outputs.deploy_needed }}"
 
       - name: Prepare image namespace
         id: prep
         run: echo "image_namespace=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      - name: No changes to deploy
+        if: ${{ steps.scope.outputs.deploy_needed != 'true' }}
+        run: echo "No matching service changes detected. Skipping production deploy."
+
       - name: Deploy via SSH
+        if: ${{ steps.scope.outputs.deploy_needed == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_NAMESPACE: ${{ steps.prep.outputs.image_namespace }}
-          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || github.event.workflow_run.head_sha }}
+          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || steps.scope.outputs.target_sha }}
           GHCR_USERNAME: ${{ env.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
           REPO_SLUG: ${{ env.REPO_SLUG }}
           DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
           ENV_PROD_SOURCE_PATH: ${{ secrets.VPS_ENV_PROD_PATH }}
+          CHANGED_IMAGES: ${{ steps.scope.outputs.changed_images }}
+          COMPOSE_SERVICES: ${{ steps.scope.outputs.compose_services }}
+          RUN_INIT_CATALOG: ${{ steps.scope.outputs.run_init_catalog }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 120m
-          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH,ENV_PROD_SOURCE_PATH
+          envs: IMAGE_NAMESPACE,IMAGE_TAG,GHCR_USERNAME,GHCR_TOKEN,REPO_SLUG,DEPLOY_PATH,ENV_PROD_SOURCE_PATH,CHANGED_IMAGES,COMPOSE_SERVICES,RUN_INIT_CATALOG
           script_stop: true
           script: |
             set -eux
@@ -105,29 +264,44 @@ jobs:
             export IMAGE_NAMESPACE="$IMAGE_NAMESPACE"
             export IMAGE_TAG="$IMAGE_TAG"
 
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml pull
-            echo "[deploy] images pulled"
-
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d postgres redis
             echo "[deploy] postgres/redis started"
+
+            if [ "${RUN_INIT_CATALOG:-false}" = "true" ]; then
+              docker compose --env-file .env.prod -f docker-compose.prod.yaml pull init-catalog
+              echo "[deploy] tools image pulled"
+            fi
+
+            if [ -n "${COMPOSE_SERVICES:-}" ]; then
+              SERVICE_ARGS="$(echo "$COMPOSE_SERVICES" | tr ',' ' ')"
+              docker compose --env-file .env.prod -f docker-compose.prod.yaml pull $SERVICE_ARGS
+              echo "[deploy] selected images pulled: $SERVICE_ARGS"
+            else
+              echo "[deploy] no runtime services selected for restart"
+            fi
 
             DB_USER="$(grep -E '^POSTGRES_USER=' .env.prod | tail -n1 | cut -d= -f2-)"
             DB_NAME="$(grep -E '^POSTGRES_DB=' .env.prod | tail -n1 | cut -d= -f2-)"
             if [ -z "$DB_USER" ]; then DB_USER="catalog"; fi
             if [ -z "$DB_NAME" ]; then DB_NAME="catalog"; fi
 
-            CATALOG_READY="$(docker compose --env-file .env.prod -f docker-compose.prod.yaml exec -T postgres \
-              psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'catalog_items') AND (SELECT COUNT(*) FROM catalog_items) > 0 THEN 1 ELSE 0 END;")"
+            if [ "${RUN_INIT_CATALOG:-false}" = "true" ]; then
+              CATALOG_READY="$(docker compose --env-file .env.prod -f docker-compose.prod.yaml exec -T postgres \
+                psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'catalog_items') AND (SELECT COUNT(*) FROM catalog_items) > 0 THEN 1 ELSE 0 END;")"
 
-            if [ "$CATALOG_READY" = "1" ]; then
-              echo "Catalog already exists in DB. Skipping init-catalog."
-            else
-              echo "Catalog not found or empty. Running init-catalog."
-              docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
+              if [ "$CATALOG_READY" = "1" ]; then
+                echo "Catalog already exists in DB. Skipping init-catalog."
+              else
+                echo "Catalog not found or empty. Running init-catalog."
+                docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
+              fi
             fi
 
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
-            echo "[deploy] services updated"
+            if [ -n "${COMPOSE_SERVICES:-}" ]; then
+              SERVICE_ARGS="$(echo "$COMPOSE_SERVICES" | tr ',' ' ')"
+              docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d $SERVICE_ARGS
+              echo "[deploy] services updated: $SERVICE_ARGS"
+            fi
 
             docker compose --env-file .env.prod -f docker-compose.prod.yaml ps
             echo "[deploy] done"
