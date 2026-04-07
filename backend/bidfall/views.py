@@ -151,10 +151,13 @@ class AuctionViewSet(viewsets.ModelViewSet):
         if auction.status != Auction.Status.DRAFT:
             return Response({"error": "Only draft auction can be published."}, status=status.HTTP_400_BAD_REQUEST)
 
+        base_url = request.build_absolute_uri('/')
+        return_url = base_url + f'auction/{auction.id}/'
         payment_data = freeze_funds(
             request.user.id,
             auction.id,
-            description=f"Заморозка для публикации аукциона #{auction.id}"
+            description=f"Заморозка для публикации аукциона #{auction.id}",
+            return_url=return_url
         )
         PaymentTransaction.objects.create(
             user=request.user,
@@ -203,10 +206,13 @@ class AuctionViewSet(viewsets.ModelViewSet):
                 "error": str(e),
             }, status=status.HTTP_400_BAD_REQUEST)
         try:
+            base_url = request.build_absolute_uri('/')
+            return_url = base_url + f'auction/{auction.id}/'
             payment_data = freeze_funds(
                 request.user.id,
                 auction.id,
-                description=f"Заморозка для участия в аукционе #{auction.id}"
+                description=f"Заморозка для участия в аукционе #{auction.id}",
+                return_url=return_url
             )
             bid = Bid.objects.create(
                 auction=auction,
