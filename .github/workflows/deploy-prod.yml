@@ -297,7 +297,7 @@ jobs:
 
             if [ -n "${COMPOSE_SERVICES:-}" ]; then
               SERVICE_ARGS="$(echo "$COMPOSE_SERVICES" | tr ',' ' ')"
-              docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d $SERVICE_ARGS
+              docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d --no-deps $SERVICE_ARGS
               echo "[deploy] services updated: $SERVICE_ARGS"
             fi
 
