@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 Configuration.configure(account_id=os.getenv('YOOKASSA_ACCOUNT_ID'), secret_key=os.getenv('YOOKASSA_SECRET_KEY'))
 
 
-def freeze_funds(participant_id: str, auction_id: str, amount: Decimal = 5000.00, description: str = "No data") -> dict:
+def freeze_funds(
+        participant_id: str,
+        auction_id: str, amount: Decimal = 5000.00,
+        description: str = "No data",
+        return_url: str = "https://example.com"
+) -> dict:
     idempotence_key = str(uuid.uuid4())
 
     payment_data = {
@@ -28,7 +33,7 @@ def freeze_funds(participant_id: str, auction_id: str, amount: Decimal = 5000.00
         },
         "confirmation": {
             "type": "redirect",
-            "return_url": f"http://localhost:5173/auction/{auction_id}"
+            "return_url": return_url
         },
     }
 
