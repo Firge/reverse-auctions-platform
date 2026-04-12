@@ -3,6 +3,7 @@ import signal
 import smtplib
 import sys
 import time
+from io import BytesIO
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -11,9 +12,16 @@ from typing import Dict, List
 
 import psycopg
 from psycopg.rows import dict_row
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 
 RUNNING = True
 HEARTBEAT_PATH = "/tmp/email_worker_heartbeat"
+PDF_FONT_NAME = "DejaVuSans"
+PDF_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_PDF_FONT_READY = False
 
 
 def _on_signal(_signum, _frame):
@@ -121,6 +129,22 @@ def get_candidate_auctions(conn: psycopg.Connection, lookback_days: int) -> List
     return conn.execute(sql, {"lookback_days": lookback_days}).fetchall()
 
 
+def get_auction_lots(conn: psycopg.Connection, auction_id: int) -> List[Dict]:
+    sql = """
+        SELECT
+            ai.catalog_item_id AS item_id,
+            ci.code AS item_code,
+            ci.name AS item_name,
+            ci.unit AS item_unit,
+            ai.quantity AS item_quantity
+        FROM auction_items ai
+        JOIN catalog_items ci ON ci.id = ai.catalog_item_id
+        WHERE ai.auction_id = %(auction_id)s
+        ORDER BY ai.id ASC;
+    """
+    return conn.execute(sql, {"auction_id": auction_id}).fetchall()
+
+
 def upsert_notification_pending(
     conn: psycopg.Connection,
     auction_id: int,
@@ -212,6 +236,84 @@ def should_send(state: Dict, max_retry_attempts: int) -> bool:
     return state["next_retry_at"] <= datetime.now(timezone.utc)
 
 
+def _ensure_pdf_font() -> str:
+    global _PDF_FONT_READY
+    if _PDF_FONT_READY:
+        return PDF_FONT_NAME
+    if os.path.exists(PDF_FONT_PATH):
+        pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, PDF_FONT_PATH))
+        _PDF_FONT_READY = True
+        return PDF_FONT_NAME
+    return "Helvetica"
+
+
+def _draw_wrapped_line(pdf: canvas.Canvas, text: str, x: float, y: float, max_width: float, line_height: float, font_name: str, font_size: int) -> float:
+    words = (text or "").split()
+    if not words:
+        pdf.drawString(x, y, "-")
+        return y - line_height
+
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if pdf.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+            continue
+        pdf.drawString(x, y, current)
+        y -= line_height
+        current = word
+    if current:
+        pdf.drawString(x, y, current)
+        y -= line_height
+    return y
+
+
+def build_lots_pdf(auction_id: int, auction_title: str, lots: List[Dict]) -> bytes:
+    font_name = _ensure_pdf_font()
+    font_size = 10
+    line_height = 14
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+    left = 40
+    right = page_width - 40
+    y = page_height - 50
+
+    def new_page() -> float:
+        pdf.showPage()
+        pdf.setFont(font_name, font_size)
+        return page_height - 50
+
+    pdf.setFont(font_name, 14)
+    pdf.drawString(left, y, f"Позиции аукциона #{auction_id}")
+    y -= 22
+    pdf.setFont(font_name, 11)
+    y = _draw_wrapped_line(pdf, f"Название: {auction_title}", left, y, right - left, line_height, font_name, 11)
+    y -= 4
+
+    pdf.setFont(font_name, 10)
+    if not lots:
+        pdf.drawString(left, y, "Список позиций пуст.")
+    else:
+        for index, lot in enumerate(lots, start=1):
+            if y < 90:
+                y = new_page()
+            code = lot.get("item_code") or "-"
+            name = lot.get("item_name") or "Без названия"
+            quantity = lot.get("item_quantity")
+            unit = lot.get("item_unit") or "шт"
+            quantity_text = f"{quantity}" if quantity is not None else "-"
+
+            pdf.drawString(left, y, f"{index}. [{code}] {quantity_text} {unit}")
+            y -= line_height
+            y = _draw_wrapped_line(pdf, f"   {name}", left, y, right - left, line_height, font_name, font_size)
+            y -= 2
+
+    pdf.save()
+    return buffer.getvalue()
+
+
 def build_email(
     settings: Settings,
     auction_id: int,
@@ -220,6 +322,8 @@ def build_email(
     winner_determined_at,
     recipient_type: str,
     recipient_email: str,
+    lots_pdf: bytes,
+    lots_pdf_name: str,
 ) -> EmailMessage:
     auction_url = settings.frontend_auction_url.format(auction_id=auction_id)
     amount = f"{winner_bid_amount:.2f}" if winner_bid_amount is not None else "не указана"
@@ -267,6 +371,12 @@ def build_email(
     msg["Message-ID"] = make_msgid(domain=settings.smtp_from.split("@")[-1])
     msg.set_content(plain)
     msg.add_alternative(html, subtype="html")
+    msg.add_attachment(
+        lots_pdf,
+        maintype="application",
+        subtype="pdf",
+        filename=lots_pdf_name,
+    )
     return msg
 
 
@@ -299,6 +409,14 @@ def process_once(conn: psycopg.Connection, settings: Settings):
     total_sent = 0
 
     for row in rows:
+        lots = get_auction_lots(conn, row["auction_id"])
+        lots_pdf = build_lots_pdf(
+            auction_id=row["auction_id"],
+            auction_title=row["auction_title"],
+            lots=lots,
+        )
+        lots_pdf_name = f"auction_{row['auction_id']}_lots.pdf"
+
         recipients = [
             ("initiator", row["initiator_email"]),
             ("winner", row["winner_email"]),
@@ -331,6 +449,8 @@ def process_once(conn: psycopg.Connection, settings: Settings):
                     winner_determined_at=row["winner_determined_at"],
                     recipient_type=recipient_type,
                     recipient_email=recipient_email,
+                    lots_pdf=lots_pdf,
+                    lots_pdf_name=lots_pdf_name,
                 )
                 smtp_send(settings, message)
                 mark_sent(conn, state["id"], message["Message-ID"])
