@@ -118,13 +118,13 @@ class AuctionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         role = getattr(getattr(self.request.user, 'profile', None), 'role', None)
         if role not in ('buyer', 'admin'):
-            raise PermissionDenied("Only buyers can create auctions.")
+            raise PermissionDenied("Только покупатели могут создавать аукционы.")
         serializer.save()
 
     def perform_update(self, serializer):
         auction = self.get_object()
         if auction.status != Auction.Status.DRAFT:
-            raise PermissionDenied("Only draft auctions can be edited by the author.")
+            raise PermissionDenied("Только черновик может редактироваться автором.")
 
         serializer.save()
 
@@ -139,7 +139,7 @@ class AuctionViewSet(viewsets.ModelViewSet):
         auction = self.get_object()
 
         if auction.status in (Auction.Status.CLOSED, Auction.Status.FINISHED, Auction.Status.CANCELED):
-            return Response({"error": "Auction is already closed or finished."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Аукцион уже закрыт или завершён."}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
             auction.status = Auction.Status.CLOSED
             auction.save(update_fields=["status"])
@@ -151,7 +151,7 @@ class AuctionViewSet(viewsets.ModelViewSet):
         auction = self.get_object()
 
         if auction.status != Auction.Status.DRAFT:
-            return Response({"error": "Only draft auction can be published."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Опубликовать можно только черновик аукциона."}, status=status.HTTP_400_BAD_REQUEST)
 
         base_url = request.build_absolute_uri('/')
         return_url = base_url + f'auction/{auction.id}/'
@@ -168,7 +168,7 @@ class AuctionViewSet(viewsets.ModelViewSet):
             payment_id=payment_data["payment_id"],
         )
         return Response({
-            "message": "Waiting for confirmation.",
+            "message": "Ожидается подтверждение.",
             "redirect_url": payment_data["confirmation_url"]
         }, status=status.HTTP_200_OK)
 
@@ -187,17 +187,17 @@ class AuctionViewSet(viewsets.ModelViewSet):
     def place_bid(self, request, pk):
         auction = self.get_object()
         if auction.status != Auction.Status.ACTIVE:
-            return Response({"error": "Auction is not active."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Аукцион не активен."}, status=status.HTTP_400_BAD_REQUEST)
 
         role = request.user.profile.role
         if role not in ('supplier', 'admin'):
-            return Response({"error": "Only suppliers can place bids."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": "Только поставщики могут делать ставки."}, status=status.HTTP_403_FORBIDDEN)
 
         raw_bid = request.data.get('bid', request.data.get('bid_amount'))
         try:
             bid_amount = Decimal(raw_bid)
         except (InvalidOperation, TypeError, ValueError):
-            return Response({"error": "Invalid bid amount."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Некорректная сумма ставки."}, status=status.HTTP_400_BAD_REQUEST)
 
         comment = request.data.get('comment', '')
         strategy = AuctionStrategyFactory.get_strategy(auction)
@@ -231,7 +231,7 @@ class AuctionViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({
-            "message": "Waiting for confirmation.",
+            "message": "Ожидается подтверждение.",
             "redirect_url": payment_data["confirmation_url"]
         }, status=status.HTTP_200_OK)
 
@@ -240,11 +240,11 @@ class AuctionViewSet(viewsets.ModelViewSet):
         auction = self.get_object()
         if auction.status not in (Auction.Status.FINISHED, Auction.Status.CLOSED):
             return Response({
-                "error": f"Auction is not finished yet.",
+                "error": "Аукцион ещё не завершён.",
             }, status=status.HTTP_400_BAD_REQUEST)
         winner_bid = auction.winner_bid
         if winner_bid is None:
-            return Response({"error": "No winner bid found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Победитель не найден."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BidSerializer(winner_bid).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsOwner], url_path="confirm-creator")
@@ -252,25 +252,25 @@ class AuctionViewSet(viewsets.ModelViewSet):
         auction = self.get_object()
         if auction.status not in (Auction.Status.FINISHED, Auction.Status.CLOSED):
             return Response({
-                "error": f"Auction is not finished yet.",
+                "error": "Аукцион ещё не завершён.",
             }, status=status.HTTP_400_BAD_REQUEST)
 
         confirmation = ConfirmationFlow.objects.filter(auction=auction).first()
         if not confirmation:
-            return Response({"error": "No confirmation found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Подтверждение не найдено."}, status=status.HTTP_404_NOT_FOUND)
 
         with transaction.atomic():
             confirmation = ConfirmationFlow.objects.select_for_update().get(pk=confirmation.pk)
 
             if confirmation.creator_signed_at is not None:
                 return Response(
-                    {"error": "Creator already signed."},
+                    {"error": "Заказчик уже подписал подтверждение."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             if timezone.now() > confirmation.signing_deadline:
                 return Response(
-                    {"error": "Signing deadline has passed."},
+                    {"error": "Срок подписания истёк."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -279,39 +279,39 @@ class AuctionViewSet(viewsets.ModelViewSet):
 
             update_confirmation_flow(confirmation)
 
-        return Response({"status": "Creator signed successfully."}, status=status.HTTP_200_OK)
+        return Response({"status": "Подтверждение заказчика успешно сохранено."}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path="confirm-winner")
     def confirm_winner(self, request, pk):
         auction = self.get_object()
         if auction.status not in (Auction.Status.FINISHED, Auction.Status.CLOSED):
             return Response({
-                "error": f"Auction is not finished yet.",
+                "error": "Аукцион ещё не завершён.",
             }, status=status.HTTP_400_BAD_REQUEST)
 
         winner_bid = auction.winner_bid
         if winner_bid is None:
-            return Response({"error": "No winner bid found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Победитель не найден."}, status=status.HTTP_404_NOT_FOUND)
 
         if request.user != winner_bid.owner:
-            raise PermissionDenied("Only the winner can confirm.")
+            raise PermissionDenied("Подтвердить результат может только победитель.")
 
         confirmation = ConfirmationFlow.objects.filter(auction=auction).first()
         if not confirmation:
-            return Response({"error": "No confirmation found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Подтверждение не найдено."}, status=status.HTTP_404_NOT_FOUND)
 
         with transaction.atomic():
             confirmation = ConfirmationFlow.objects.select_for_update().get(pk=confirmation.pk)
 
             if confirmation.winner_signed_at is not None:
                 return Response(
-                    {"error": "Winner already signed."},
+                    {"error": "Победитель уже подписал подтверждение."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             if timezone.now() > confirmation.signing_deadline:
                 return Response(
-                    {"error": "Signing deadline has passed."},
+                    {"error": "Срок подписания истёк."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -320,7 +320,7 @@ class AuctionViewSet(viewsets.ModelViewSet):
 
             update_confirmation_flow(confirmation)
 
-        return Response({"status": "Winner signed successfully."}, status=status.HTTP_200_OK)
+        return Response({"status": "Подтверждение победителя успешно сохранено."}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated], url_path="confirmation")
     def confirmation_status(self, request, pk):
@@ -328,11 +328,11 @@ class AuctionViewSet(viewsets.ModelViewSet):
         user = request.user
 
         if user != auction.owner and (not auction.winner_bid or user != auction.winner_bid.owner):
-            raise PermissionDenied("Only the auction creator or winner can view confirmation status.")
+            raise PermissionDenied("Статус подтверждения может смотреть только создатель аукциона или победитель.")
 
         confirmation = ConfirmationFlow.objects.filter(auction=auction).first()
         if not confirmation:
-            return Response({"error": "No confirmation found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Подтверждение не найдено."}, status=status.HTTP_404_NOT_FOUND)
 
         data = {
             "creator_signed_at": confirmation.creator_signed_at.isoformat() if confirmation.creator_signed_at else None,
@@ -390,12 +390,12 @@ class CatalogItemByIdsView(APIView):
     def get(self, request):
         ids_param = request.query_params.get('ids')
         if not ids_param:
-            return Response({"error": "ids parameter is required"}, status=400)
+            return Response({"error": "Параметр ids обязателен."}, status=400)
 
         try:
             ids = [int(x.strip()) for x in ids_param.split(',')]
         except ValueError:
-            return Response({"error": "Invalid ids format"}, status=400)
+            return Response({"error": "Некорректный формат ids."}, status=400)
 
         items = CatalogItem.objects.filter(id__in=ids)
         serializer = CatalogItemSerializer(items, many=True)

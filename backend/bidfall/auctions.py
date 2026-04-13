@@ -43,7 +43,7 @@ class AuctionStrategyFactory:
     def get_strategy(cls, auction: Auction) -> AuctionStrategy:
         strategy_class = cls._strategies.get(auction.auction_type.model)
         if not strategy_class:
-            raise ValueError(f"No strategy registered for {auction.auction_type.name}")
+            raise ValueError(f"Для типа аукциона {auction.auction_type.name} не зарегистрирована стратегия.")
         return strategy_class()
 
 
@@ -51,14 +51,14 @@ class AuctionStrategyFactory:
 class ReverseEnglishAuctionStrategy(AuctionStrategy):
     def validate_bid(self, auction, bid_amount):
         if bid_amount is None:
-            raise ValueError("Bid cannot be None")
+            raise ValueError("Ставка не может быть пустой.")
         if bid_amount > auction.start_price:
-            raise ValueError("Bid can not be higher than starting price")
+            raise ValueError("Ставка не может быть выше начальной цены.")
         if auction.current_price is None:
             return
         specific = auction.specific_auction
         if auction.current_price - bid_amount < specific.min_bid_decrement:
-            raise ValueError(f"Bid decrement must be at least {specific.min_bid_decrement}")
+            raise ValueError(f"Шаг снижения ставки должен быть не меньше {specific.min_bid_decrement}.")
 
     def process_bid(self, auction: Auction, bid: Bid):
         auction.current_price = bid.bid

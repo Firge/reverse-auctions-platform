@@ -128,7 +128,7 @@ async function parseJson<T>(response: Response): Promise<T> {
     const error = (data ?? {}) as ApiError;
     const detailText = formatApiErrorData(data);
     const err = new Error(
-      String(detailText ?? error.error ?? error.detail ?? `HTTP ${response.status}`),
+      String(detailText ?? error.error ?? error.detail ?? `Ошибка HTTP ${response.status}`),
     ) as Error & { status?: number };
     err.status = response.status;
     throw err;
@@ -203,6 +203,14 @@ function shouldFallbackToSameOrigin(error: unknown) {
   if (error.message.startsWith("Неверный ответ сервера")) return true;
   // fetch() network errors in browsers often surface as TypeError("Failed to fetch")
   return /Failed to fetch|NetworkError|Load failed/i.test(error.message);
+}
+
+export function toRussianErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) return "Неизвестная ошибка.";
+  if (/Failed to fetch|NetworkError|Load failed/i.test(error.message)) {
+    return "Не удалось связаться с сервером.";
+  }
+  return error.message || "Неизвестная ошибка.";
 }
 
 export async function registerUser(payload: RegisterPayload, baseUrl?: string) {

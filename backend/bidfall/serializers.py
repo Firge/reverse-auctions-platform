@@ -20,12 +20,12 @@ class RegisterSerializer(serializers.Serializer):
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
+            raise serializers.ValidationError("Пользователь с таким email уже существует.")
         return value.lower()
 
     def validate_username(self, value):
         if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError("A user with this username already exists.")
+            raise serializers.ValidationError("Пользователь с таким именем уже существует.")
         return value
 
     def validate_password(self, value):
@@ -84,7 +84,7 @@ class AccountUpdateSerializer(serializers.Serializer):
     def validate_username(self, value):
         user = self.context["request"].user
         if User.objects.filter(username__iexact=value).exclude(id=user.id).exists():
-            raise serializers.ValidationError("A user with this username already exists.")
+            raise serializers.ValidationError("Пользователь с таким именем уже существует.")
         return value
 
     def validate_password(self, value):
@@ -98,7 +98,7 @@ class AccountUpdateSerializer(serializers.Serializer):
         user = self.context["request"].user
         current_role = user.profile.role
         if current_role != value:
-            raise serializers.ValidationError("Role cannot be changed.")
+            raise serializers.ValidationError("Роль нельзя изменить.")
         return value
 
     def validate_inn(self, value):
@@ -250,32 +250,32 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
         start_date = attrs.get('start_date', getattr(self.instance, 'start_date', None))
         end_date = attrs.get('end_date', getattr(self.instance, 'end_date', None))
         if start_date and end_date and end_date <= start_date:
-            raise serializers.ValidationError({'end_date': 'end_date must be later than start_date'})
+            raise serializers.ValidationError({'end_date': 'Дата окончания должна быть позже даты начала.'})
         return attrs
 
     def validate_auction_type(self, value):
         registered_names = AuctionCreateSerializerFactory.get_registered_names()
         if value not in registered_names:
-            raise serializers.ValidationError(f"Invalid auction type '{value}', supported: {registered_names}")
+            raise serializers.ValidationError(f"Некорректный тип аукциона '{value}'. Поддерживаются: {registered_names}")
         return value
 
     def validate_lots(self, value):
         validated_lots = []
         for lot in value:
             if 'id' not in lot:
-                raise serializers.ValidationError("Each lot must have an 'id' field")
+                raise serializers.ValidationError("У каждого лота должно быть поле 'id'.")
             if 'quantity' not in lot:
-                raise serializers.ValidationError("Each lot must have a 'quantity' field")
+                raise serializers.ValidationError("У каждого лота должно быть поле 'quantity'.")
 
             try:
                 lot_id = int(lot['id'])
                 quantity = Decimal(lot['quantity'])
             except (ValueError, TypeError):
-                raise serializers.ValidationError(f"Invalid id or quantity format in lot: {lot}")
+                raise serializers.ValidationError(f"Некорректный формат id или quantity в лоте: {lot}")
             if quantity <= 0:
-                raise serializers.ValidationError(f"Quantity must be positive for lot {lot_id}")
+                raise serializers.ValidationError(f"Количество для лота {lot_id} должно быть больше нуля.")
             if not CatalogItem.objects.filter(id=lot_id).exists():
-                raise serializers.ValidationError(f"Catalog item with id {lot_id} does not exist")
+                raise serializers.ValidationError(f"Позиция каталога с id {lot_id} не существует.")
             validated_lots.append({'id': lot_id, 'quantity': quantity})
 
         return validated_lots
@@ -286,11 +286,11 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
 
     @property
     def specific_model(self):
-        raise NotImplementedError("Must be implemented by subclass")
+        raise NotImplementedError("Должно быть реализовано в подклассе.")
 
     @property
     def specific_fields(self):
-        raise NotImplementedError("Must be implemented by subclass")
+        raise NotImplementedError("Должно быть реализовано в подклассе.")
 
     def to_representation(self, instance):
         return AuctionSerializer(instance, context=self.context).data
@@ -341,7 +341,7 @@ class BaseAuctionCreateSerializer(serializers.Serializer):
 
         new_auction_type = common_data.pop('auction_type')
         if new_auction_type is not None and new_auction_type != instance.auction_type.model:
-            raise ValidationError('Changing auction type is not allowed.')
+            raise ValidationError('Изменение типа аукциона запрещено.')
 
         for attr, value in specific_data.items():
             setattr(instance.specific_auction, attr, value)
