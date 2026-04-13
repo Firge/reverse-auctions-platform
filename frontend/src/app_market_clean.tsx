@@ -240,8 +240,30 @@ function LotPicker({
     let active = true;
     const loadNodes = async () => {
       try {
-        const data = await fetchCatalogNodes({ limit: 200 }, baseUrl, token);
-        if (active) setNodes(data.results);
+        const byId = new Map<number, CatalogNode>();
+        const queue: number[] = [];
+
+        const roots = await fetchCatalogNodes({ limit: 500 }, baseUrl, token);
+        roots.results.forEach((node) => {
+          if (!byId.has(node.id)) {
+            byId.set(node.id, node);
+            queue.push(node.id);
+          }
+        });
+
+        // Load children for each discovered node because backend returns roots by default.
+        while (queue.length) {
+          const parentId = queue.shift();
+          if (parentId == null) continue;
+          const children = await fetchCatalogNodes({ parent_id: parentId, limit: 500 }, baseUrl, token);
+          children.results.forEach((node) => {
+            if (byId.has(node.id)) return;
+            byId.set(node.id, node);
+            queue.push(node.id);
+          });
+        }
+
+        if (active) setNodes(Array.from(byId.values()));
       } catch {
         if (active) setNodes([]);
       }
@@ -318,6 +340,7 @@ function LotPicker({
     () => nodes.filter((node) => !node.has_children || node.items_count > 0),
     [nodes],
   );
+  const categoryOptions = selectableNodes.length ? selectableNodes : nodes;
 
   function itemHierarchyText(item?: CatalogItem) {
     if (!item) return "";
@@ -391,7 +414,7 @@ function LotPicker({
                   disabled={disabled}
                 >
                   <option value="">Все конечные категории</option>
-                  {selectableNodes.map((node) => (
+                  {categoryOptions.map((node) => (
                     <option key={node.id} value={node.id}>{node.name}</option>
                   ))}
                 </select>
