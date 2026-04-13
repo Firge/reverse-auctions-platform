@@ -351,6 +351,18 @@ function LotPicker({
     return node.name ?? "";
   }
 
+  function itemDisplayName(item?: CatalogItem) {
+    if (!item) return "";
+    const node = nodeById.get(item.node_id);
+    if (!node?.name) return item.name;
+    const normalizedItemName = (item.name ?? "").trim().toLowerCase();
+    const normalizedNodeName = node.name.trim().toLowerCase();
+    if (!normalizedItemName || normalizedItemName.includes(normalizedNodeName)) {
+      return item.name;
+    }
+    return `${node.name} - ${item.name}`;
+  }
+
   function addLot(item: CatalogItem) {
     if (selectedIds.has(item.id)) return;
     onChange([
@@ -433,7 +445,7 @@ function LotPicker({
                 {items.map((item) => (
                   <div key={item.id} className="mk-catalog-row">
                     <div>
-                      <strong>{item.name}</strong>
+                      <strong>{itemDisplayName(item)}</strong>
                       <span>{item.code} · {item.unit}</span>
                       {itemHierarchyText(item) ? <span>{itemHierarchyText(item)}</span> : null}
                     </div>
@@ -457,7 +469,7 @@ function LotPicker({
             return (
               <div key={lot.id} className="mk-selected-lot-row">
                 <div>
-                  <strong>{item?.name ?? `Позиция #${lot.id}`}</strong>
+                  <strong>{item ? itemDisplayName(item) : `Позиция #${lot.id}`}</strong>
                   <span>{item?.code ?? "Код отсутствует"}</span>
                   {itemHierarchyText(item) ? <span>{itemHierarchyText(item)}</span> : null}
                 </div>
