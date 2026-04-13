@@ -20,7 +20,7 @@ class PartyNotFoundError(DadataError):
 def find_party_by_inn(inn: str) -> dict:
     api_key = getattr(settings, "DADATA_API_KEY", "")
     if not api_key:
-        raise DadataNotConfiguredError("DADATA_API_KEY is not configured.")
+        raise DadataNotConfiguredError("Ключ DaData не настроен.")
 
     payload = json.dumps({"query": inn}).encode("utf-8")
     request = Request(
@@ -39,9 +39,12 @@ def find_party_by_inn(inn: str) -> dict:
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         details = exc.read().decode("utf-8", errors="ignore")
-        raise DadataError(f"DaData returned HTTP {exc.code}. {details}".strip()) from exc
+        message = f"DaData вернул ошибку HTTP {exc.code}."
+        if details:
+            message = f"{message} {details}".strip()
+        raise DadataError(message) from exc
     except URLError as exc:
-        raise DadataError("DaData is unavailable right now.") from exc
+        raise DadataError("Сервис DaData сейчас недоступен.") from exc
 
     suggestions = data.get("suggestions") or []
     if not suggestions:

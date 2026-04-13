@@ -23,6 +23,7 @@ import {
   registerUser,
   setStoredTokens,
   submitBid,
+  toRussianErrorMessage,
   updateAuction,
   updateCurrentUser,
   validateAuctionLots,
@@ -270,7 +271,7 @@ function LotPicker({
       } catch (err) {
         if (!active) return;
         setItems([]);
-        setError((err as Error).message || "Не удалось загрузить каталог");
+        setError(toRussianErrorMessage(err));
       } finally {
         if (active) setLoading(false);
       }
@@ -589,27 +590,27 @@ export function App() {
       const allN = all.map(normalizeAuction); const activeN = active.map(normalizeAuction);
       setAllAuctions(allN); setActiveAuctions(activeN);
       if (!selectedId && activeN[0]) setSelectedId(activeN[0].id);
-    } catch (e) { setToast({ kind: "error", text: `Не удалось загрузить аукционы: ${(e as Error).message}` }); }
+    } catch (e) { setToast({ kind: "error", text: `Не удалось загрузить аукционы: ${toRussianErrorMessage(e)}` }); }
     finally { setLoadingAuctions(false); }
   }
   async function loadAuction(id: number, silent = false) {
     if (!silent) setLoadingAuction(true);
     try { setAuction(normalizeAuction(await fetchAuction(id, apiBase, tokens?.access ?? undefined))); }
-    catch (e) { setAuction(null); setToast({ kind: "error", text: `Не удалось загрузить аукцион: ${(e as Error).message}` }); }
+    catch (e) { setAuction(null); setToast({ kind: "error", text: `Не удалось загрузить аукцион: ${toRussianErrorMessage(e)}` }); }
     finally { if (!silent) setLoadingAuction(false); }
   }
   async function loadBids(id: number) {
     if (!tokens?.access) { setBids([]); setBidsMsg("Войдите, чтобы посмотреть историю ставок."); return; }
     setLoadingBids(true); setBidsMsg("");
     try { const data = await fetchAuctionBids(id, tokens.access, apiBase); setBids(data); if (!data.length) setBidsMsg("Ставок пока нет."); }
-    catch (e) { setBids([]); setBidsMsg((e as Error).message); }
+    catch (e) { setBids([]); setBidsMsg(toRussianErrorMessage(e)); }
     finally { setLoadingBids(false); }
   }
   async function loadWinner(id: number) {
     if (!tokens?.access) { setWinner(null); setWinnerMsg("Войдите, чтобы проверить победителя."); return; }
     setLoadingWinner(true); setWinnerMsg("");
     try { setWinner(await fetchAuctionWinner(id, tokens.access, apiBase)); }
-    catch (e) { setWinner(null); setWinnerMsg((e as Error).message); }
+    catch (e) { setWinner(null); setWinnerMsg(toRussianErrorMessage(e)); }
     finally { setLoadingWinner(false); }
   }
 
@@ -692,7 +693,7 @@ export function App() {
           setRegisterForm((form) => ({ ...form, company_name: party.company_name, inn }));
         } catch (err) {
           setRegisterInnResolved("");
-          setRegisterInnError((err as Error).message || "ИНН не найден.");
+          setRegisterInnError(toRussianErrorMessage(err));
         } finally {
           setRegisterInnLoading(false);
         }
@@ -727,7 +728,7 @@ export function App() {
           setAccountForm((form) => ({ ...form, company_name: party.company_name, inn }));
         } catch (err) {
           setAccountInnResolved("");
-          setAccountInnError((err as Error).message || "ИНН не найден.");
+          setAccountInnError(toRussianErrorMessage(err));
         } finally {
           setAccountInnLoading(false);
         }
@@ -748,7 +749,7 @@ export function App() {
   async function onLogin(e: FormEvent) {
     e.preventDefault(); setAuthLoading(true);
     try { const pair = await loginUser(loginForm.username, loginForm.password, apiBase); setStoredTokens(pair); setTokens(pair); setToast({ kind: "ok", text: "Вход выполнен." }); go({ name: "account" }); }
-    catch (err) { setToast({ kind: "error", text: `Ошибка входа: ${(err as Error).message}` }); }
+    catch (err) { setToast({ kind: "error", text: `Ошибка входа: ${toRussianErrorMessage(err)}` }); }
     finally { setAuthLoading(false); }
   }
   async function onRegister(e: FormEvent) {
@@ -760,7 +761,7 @@ export function App() {
       return;
     }
     try { const res = await registerUser({ ...registerForm, role: registerForm.role === "admin" ? "supplier" : registerForm.role }, apiBase); setLoginForm((f) => ({ ...f, username: res.username })); setToast({ kind: "ok", text: `Аккаунт создан: ${res.username}.` }); go({ name: "login" }); }
-    catch (err) { setToast({ kind: "error", text: `Ошибка регистрации: ${(err as Error).message}` }); }
+    catch (err) { setToast({ kind: "error", text: `Ошибка регистрации: ${toRussianErrorMessage(err)}` }); }
     finally { setAuthLoading(false); }
   }
   async function onCreate(e: FormEvent) {
@@ -785,7 +786,7 @@ export function App() {
     };
     setCreateLoading(true);
     try { const created = normalizeAuction(await createAuction(payload, tokens.access, apiBase)); setCreateForm(DEFAULT_CREATE); setCreateLots([]); setToast({ kind: "ok", text: `Аукцион создан.` }); await refreshAuctions(); await loadOwnedAuctions(tokens.access); openAuction(created.id); }
-    catch (err) { setToast({ kind: "error", text: `Ошибка создания: ${(err as Error).message}` }); }
+    catch (err) { setToast({ kind: "error", text: `Ошибка создания: ${toRussianErrorMessage(err)}` }); }
     finally { setCreateLoading(false); }
   }
   async function onBid(e: FormEvent) {
@@ -793,7 +794,7 @@ export function App() {
     if (!tokens?.access) { setToast({ kind: "error", text: "Сначала войдите в аккаунт, чтобы сделать ставку." }); go({ name: "login" }); return; }
     setBidLoading(true);
     try { const result = await submitBid(auction.id, tokens.access, bidForm, apiBase); window.location.href = result.redirect_url; }
-    catch (err) { setToast({ kind: "error", text: `Ошибка ставки: ${(err as Error).message}` }); }
+    catch (err) { setToast({ kind: "error", text: `Ошибка ставки: ${toRussianErrorMessage(err)}` }); }
     finally { setBidLoading(false); }
   }
   async function onSaveAccount(e: FormEvent) {
@@ -822,7 +823,7 @@ export function App() {
       setAccountForm((f) => ({ ...f, password: "" }));
       setToast({ kind: "ok", text: "Данные аккаунта обновлены." });
     } catch (err) {
-      setToast({ kind: "error", text: `Ошибка обновления: ${(err as Error).message}` });
+      setToast({ kind: "error", text: `Ошибка обновления: ${toRussianErrorMessage(err)}` });
     } finally {
       setAccountSaving(false);
     }
@@ -862,7 +863,7 @@ export function App() {
       await loadOwnedAuctions(tokens.access);
       setToast({ kind: "ok", text: "Черновик сохранен." });
     } catch (err) {
-      setToast({ kind: "error", text: `Ошибка сохранения: ${(err as Error).message}` });
+      setToast({ kind: "error", text: `Ошибка сохранения: ${toRussianErrorMessage(err)}` });
     } finally {
       setDraftEditLoading(false);
     }
@@ -883,7 +884,7 @@ export function App() {
       const { redirect_url } = await publishAuction(auction.id, tokens.access, apiBase);
       window.location.href = redirect_url;
     } catch (err) {
-      setToast({ kind: "error", text: `Ошибка публикации: ${(err as Error).message}` });
+      setToast({ kind: "error", text: `Ошибка публикации: ${toRussianErrorMessage(err)}` });
       setDraftEditLoading(false);
     }
   }
@@ -901,7 +902,7 @@ export function App() {
       await loadOwnedAuctions(tokens.access);
       setToast({ kind: "ok", text: "Аукцион закрыт." });
     } catch (err) {
-      setToast({ kind: "error", text: `Ошибка закрытия: ${(err as Error).message}` });
+      setToast({ kind: "error", text: `Ошибка закрытия: ${toRussianErrorMessage(err)}` });
     }
   }
 
