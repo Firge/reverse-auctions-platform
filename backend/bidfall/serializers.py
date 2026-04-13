@@ -5,6 +5,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from .dadata import DadataError, PartyNotFoundError, find_party_by_inn
+from .inn import INN_REGEX, is_valid_inn, normalize_inn
 from .models import Auction, Bid, AuctionItem, ReverseEnglishAuction, CatalogItem, Profile, CatalogNode
 
 
@@ -32,6 +34,27 @@ class RegisterSerializer(serializers.Serializer):
         except ValidationError as exc:
             raise serializers.ValidationError(list(exc.messages))
         return value
+
+    def validate_inn(self, value):
+        normalized = normalize_inn(value)
+        if not normalized:
+            return ""
+        if not INN_REGEX.fullmatch(normalized) or not is_valid_inn(normalized):
+            raise serializers.ValidationError("Введите корректный ИНН.")
+        return normalized
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        inn = attrs.get("inn", "")
+        if inn:
+            try:
+                party = find_party_by_inn(inn)
+            except PartyNotFoundError as exc:
+                raise serializers.ValidationError({"inn": str(exc)}) from exc
+            except DadataError as exc:
+                raise serializers.ValidationError({"inn": str(exc)}) from exc
+            attrs["company_name"] = party["company_name"]
+        return attrs
 
     def create(self, validated_data):
         role = validated_data.pop('role')
@@ -77,6 +100,27 @@ class AccountUpdateSerializer(serializers.Serializer):
         if current_role != value:
             raise serializers.ValidationError("Role cannot be changed.")
         return value
+
+    def validate_inn(self, value):
+        normalized = normalize_inn(value)
+        if not normalized:
+            return ""
+        if not INN_REGEX.fullmatch(normalized) or not is_valid_inn(normalized):
+            raise serializers.ValidationError("Введите корректный ИНН.")
+        return normalized
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        inn = attrs.get("inn")
+        if inn:
+            try:
+                party = find_party_by_inn(inn)
+            except PartyNotFoundError as exc:
+                raise serializers.ValidationError({"inn": str(exc)}) from exc
+            except DadataError as exc:
+                raise serializers.ValidationError({"inn": str(exc)}) from exc
+            attrs["company_name"] = party["company_name"]
+        return attrs
 
     @transaction.atomic
     def update(self, instance, validated_data):

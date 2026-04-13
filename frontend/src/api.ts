@@ -12,6 +12,7 @@ import type {
   CatalogNodesResponse,
   CurrentUser,
   CurrentUserUpdatePayload,
+  PartyLookupResponse,
   RegisterPayload,
   RegisterResponse,
   TokenPair,
@@ -369,6 +370,17 @@ export async function updateCurrentUser(
     method: "PATCH",
     token,
     body: JSON.stringify(payload),
+    baseUrl,
+  });
+}
+
+export async function fetchPartyByInn(
+  inn: string,
+  baseUrl?: string,
+) {
+  return request<PartyLookupResponse>("/api/organizations/by-inn/", {
+    method: "POST",
+    body: JSON.stringify({ inn }),
     baseUrl,
   });
 }

@@ -161,3 +161,9 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Europe/Moscow'
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+DADATA_API_KEY = os.environ.get('DADATA_API_KEY', '')
+DADATA_PARTY_URL = os.environ.get(
+    'DADATA_PARTY_URL',
+    'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party',
+)

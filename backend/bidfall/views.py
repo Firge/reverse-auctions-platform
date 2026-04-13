@@ -12,6 +12,8 @@ from rest_framework.views import APIView
 
 from .auctions import AuctionStrategyFactory, finalize_auction_with_winner
 from .confirmation import update_confirmation_flow
+from .dadata import DadataError, DadataNotConfiguredError, PartyNotFoundError, find_party_by_inn
+from .inn import INN_REGEX, is_valid_inn, normalize_inn
 from .serializers import (
     RegisterSerializer,
     AccountUpdateSerializer,
@@ -398,3 +400,26 @@ class CatalogItemByIdsView(APIView):
         items = CatalogItem.objects.filter(id__in=ids)
         serializer = CatalogItemSerializer(items, many=True)
         return Response(serializer.data)
+
+
+class PartyLookupByInnView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        raw_inn = request.data.get("inn", "")
+        inn = normalize_inn(raw_inn)
+        if not inn:
+            return Response({"inn": ["ИНН обязателен."]}, status=status.HTTP_400_BAD_REQUEST)
+        if not INN_REGEX.fullmatch(inn) or not is_valid_inn(inn):
+            return Response({"inn": ["Введите корректный ИНН."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            party = find_party_by_inn(inn)
+        except PartyNotFoundError as exc:
+            return Response({"inn": [str(exc)]}, status=status.HTTP_404_NOT_FOUND)
+        except DadataNotConfiguredError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except DadataError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(party, status=status.HTTP_200_OK)

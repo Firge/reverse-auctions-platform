@@ -35,6 +35,7 @@ urlpatterns = [
     path('api/auth/me/auctions/', views.my_auctions_view, name='me-auctions'),
     path('api/auth/me/participating-auctions/', views.my_participating_auctions_view, name='me-participating-auctions'),
     path('api/server-time/', views.server_time_view, name='server-time'),
+    path('api/organizations/by-inn/', views.PartyLookupByInnView.as_view(), name='party-by-inn'),
     path('api/catalog/nodes/', views.CatalogNodeListView.as_view(), name='catalog-nodes'),
     path('api/catalog/items/', views.CatalogItemListView.as_view(), name='catalog-items'),
     path('api/catalog/items/by-ids/', views.CatalogItemByIdsView.as_view(), name='catalog-items-by-ids'),

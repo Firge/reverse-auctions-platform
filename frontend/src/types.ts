@@ -152,3 +152,11 @@ export type CurrentUserUpdatePayload = {
   company_name?: string;
   inn?: string;
 };
+
+export type PartyLookupResponse = {
+  inn: string;
+  company_name: string;
+  full_name?: string;
+  ogrn?: string;
+  kpp?: string;
+};

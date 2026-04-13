@@ -13,6 +13,7 @@ import {
   fetchMyAuctions,
   fetchAuctions,
   fetchMyParticipatingAuctions,
+  fetchPartyByInn,
   fetchServerTime,
   getStoredApiBase,
   getStoredTokens,
@@ -68,6 +69,8 @@ type DraftEditForm = {
   start_date_local: string;
   end_date_local: string;
 };
+
+const INN_REGEX = /^(?:\d{10}|\d{12})$/;
 
 function dt(minutesAhead: number) {
   const d = new Date(Date.now() + minutesAhead * 60_000);
@@ -146,6 +149,26 @@ function timeLeft(v?: string | null, nowMs = Date.now()) {
   if (s <= 0) return "Завершен";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h >= 24 ? `${Math.floor(h / 24)}д ${h % 24}ч осталось` : `${h}ч ${m}м осталось`;
+}
+
+function normalizeInnInput(value: string) {
+  return value.replace(/\D/g, "").slice(0, 12);
+}
+
+function calcInnChecksum(digits: string, coefficients: number[]) {
+  const total = coefficients.reduce((sum, coefficient, index) => sum + Number(digits[index]) * coefficient, 0);
+  return (total % 11) % 10;
+}
+
+function isValidInn(inn: string) {
+  if (!INN_REGEX.test(inn)) return false;
+  if (inn.length === 10) {
+    return calcInnChecksum(inn, [2, 4, 10, 3, 5, 9, 4, 6, 8]) === Number(inn[9]);
+  }
+  return (
+    calcInnChecksum(inn, [7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === Number(inn[10])
+    && calcInnChecksum(inn, [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === Number(inn[11])
+  );
 }
 
 function Card({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode }) {
@@ -448,6 +471,9 @@ export function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">(route.name === "register" ? "register" : "login");
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [registerForm, setRegisterForm] = useState<RegisterPayload>({ username: "", email: "", password: "", role: "supplier", company_name: "", inn: "" });
+  const [registerInnLoading, setRegisterInnLoading] = useState(false);
+  const [registerInnError, setRegisterInnError] = useState("");
+  const [registerInnResolved, setRegisterInnResolved] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm>(DEFAULT_CREATE);
   const [createLots, setCreateLots] = useState<AuctionLotInput[]>([]);
@@ -460,6 +486,9 @@ export function App() {
   const [participatingAuctions, setParticipatingAuctions] = useState<Auction[]>([]);
   const [participatingLoading, setParticipatingLoading] = useState(false);
   const [accountForm, setAccountForm] = useState<AccountForm>(DEFAULT_ACCOUNT_FORM);
+  const [accountInnLoading, setAccountInnLoading] = useState(false);
+  const [accountInnError, setAccountInnError] = useState("");
+  const [accountInnResolved, setAccountInnResolved] = useState("");
   const [accountSaving, setAccountSaving] = useState(false);
   const [draftLots, setDraftLots] = useState<AuctionLotInput[]>([]);
   const [draftLotErrors, setDraftLotErrors] = useState<string[]>([]);
@@ -620,6 +649,76 @@ export function App() {
   }, [auction?.id, auction?.title, auction?.description, auction?.start_price, auction?.start_date, auction?.end_date, auction?.specific?.min_bid_decrement]);
   useEffect(() => { if (!selectedId) return; startTransition(() => { void loadAuction(selectedId); }); }, [selectedId, apiBase]);
   useEffect(() => { if (route.name === "auction" && detailTab === "bids" && selectedId) void loadBids(selectedId); }, [route, detailTab, selectedId, apiBase, tokens?.access]);
+  useEffect(() => {
+    const inn = normalizeInnInput(registerForm.inn ?? "");
+    if (!inn) {
+      setRegisterInnError("");
+      setRegisterInnResolved("");
+      return;
+    }
+    if (!INN_REGEX.test(inn)) {
+      setRegisterInnError("ИНН должен содержать 10 или 12 цифр.");
+      setRegisterInnResolved("");
+      return;
+    }
+    if (!isValidInn(inn)) {
+      setRegisterInnError("Введите корректный ИНН.");
+      setRegisterInnResolved("");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setRegisterInnLoading(true);
+        setRegisterInnError("");
+        try {
+          const party = await fetchPartyByInn(inn, apiBase);
+          setRegisterInnResolved(party.company_name);
+          setRegisterForm((form) => ({ ...form, company_name: party.company_name, inn }));
+        } catch (err) {
+          setRegisterInnResolved("");
+          setRegisterInnError((err as Error).message || "ИНН не найден.");
+        } finally {
+          setRegisterInnLoading(false);
+        }
+      })();
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [registerForm.inn, apiBase]);
+  useEffect(() => {
+    const inn = normalizeInnInput(accountForm.inn);
+    if (!inn) {
+      setAccountInnError("");
+      setAccountInnResolved("");
+      return;
+    }
+    if (!INN_REGEX.test(inn)) {
+      setAccountInnError("ИНН должен содержать 10 или 12 цифр.");
+      setAccountInnResolved("");
+      return;
+    }
+    if (!isValidInn(inn)) {
+      setAccountInnError("Введите корректный ИНН.");
+      setAccountInnResolved("");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setAccountInnLoading(true);
+        setAccountInnError("");
+        try {
+          const party = await fetchPartyByInn(inn, apiBase);
+          setAccountInnResolved(party.company_name);
+          setAccountForm((form) => ({ ...form, company_name: party.company_name, inn }));
+        } catch (err) {
+          setAccountInnResolved("");
+          setAccountInnError((err as Error).message || "ИНН не найден.");
+        } finally {
+          setAccountInnLoading(false);
+        }
+      })();
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [accountForm.inn, apiBase]);
 
   const source = catalogMode === "active" ? activeAuctions : allAuctions;
   const filtered = useMemo(() => {
@@ -638,6 +737,12 @@ export function App() {
   }
   async function onRegister(e: FormEvent) {
     e.preventDefault(); setAuthLoading(true);
+    const normalizedInn = normalizeInnInput(registerForm.inn ?? "");
+    if (normalizedInn && !isValidInn(normalizedInn)) {
+      setAuthLoading(false);
+      setToast({ kind: "error", text: "Введите корректный ИНН." });
+      return;
+    }
     try { const res = await registerUser({ ...registerForm, role: registerForm.role === "admin" ? "supplier" : registerForm.role }, apiBase); setLoginForm((f) => ({ ...f, username: res.username })); setToast({ kind: "ok", text: `Аккаунт создан: ${res.username}.` }); go({ name: "login" }); }
     catch (err) { setToast({ kind: "error", text: `Ошибка регистрации: ${(err as Error).message}` }); }
     finally { setAuthLoading(false); }
@@ -681,11 +786,16 @@ export function App() {
       setToast({ kind: "error", text: "Сначала войдите в аккаунт." });
       return;
     }
+    const normalizedInn = normalizeInnInput(accountForm.inn);
+    if (normalizedInn && !isValidInn(normalizedInn)) {
+      setToast({ kind: "error", text: "Введите корректный ИНН." });
+      return;
+    }
     const payload: CurrentUserUpdatePayload = {
       username: accountForm.username.trim(),
       role: accountForm.role,
       company_name: accountForm.company_name,
-      inn: accountForm.inn,
+      inn: normalizedInn,
     };
     if (accountForm.password.trim()) payload.password = accountForm.password;
 
@@ -866,8 +976,11 @@ export function App() {
                     <label className="mk-field-label">Пароль<input type="password" value={registerForm.password} onChange={(e) => setRegisterForm((f) => ({ ...f, password: e.target.value }))} /></label>
                     <label className="mk-field-label">Роль<select value={registerForm.role} onChange={(e) => setRegisterForm((f) => ({ ...f, role: e.target.value as UserRole }))}><option value="supplier">Поставщик</option><option value="buyer">Покупатель</option></select></label>
                     <label className="mk-field-label">Компания<input value={registerForm.company_name ?? ""} onChange={(e) => setRegisterForm((f) => ({ ...f, company_name: e.target.value }))} /></label>
-                    <label className="mk-field-label">ИНН<input value={registerForm.inn ?? ""} onChange={(e) => setRegisterForm((f) => ({ ...f, inn: e.target.value }))} /></label>
+                    <label className="mk-field-label">ИНН<input value={registerForm.inn ?? ""} inputMode="numeric" pattern="^(?:\\d{10}|\\d{12})$" onChange={(e) => setRegisterForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} /></label>
                   </div>
+                  {registerInnLoading ? <div className="mk-note">Проверяем ИНН в DaData...</div> : null}
+                  {registerInnResolved ? <div className="mk-note">Организация найдена: {registerInnResolved}</div> : null}
+                  {registerInnError ? <div className="mk-warning">{registerInnError}</div> : null}
                   <button type="submit" disabled={authLoading}>{authLoading ? "Регистрация..." : "Создать аккаунт"}</button>
                 </form>
               )}
@@ -920,12 +1033,15 @@ export function App() {
                       <input value={accountForm.company_name} onChange={(e) => setAccountForm((f) => ({ ...f, company_name: e.target.value }))} />
                     </label>
                     <label className="mk-field-label">ИНН
-                      <input value={accountForm.inn} onChange={(e) => setAccountForm((f) => ({ ...f, inn: e.target.value }))} />
+                      <input value={accountForm.inn} inputMode="numeric" pattern="^(?:\\d{10}|\\d{12})$" onChange={(e) => setAccountForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} />
                     </label>
                     <label className="mk-field-label">Новый пароль (необязательно)
                       <input type="password" value={accountForm.password} onChange={(e) => setAccountForm((f) => ({ ...f, password: e.target.value }))} placeholder="Оставьте пустым, если не хотите менять пароль" />
                     </label>
                   </div>
+                  {accountInnLoading ? <div className="mk-note">Проверяем ИНН в DaData...</div> : null}
+                  {accountInnResolved ? <div className="mk-note">Организация найдена: {accountInnResolved}</div> : null}
+                  {accountInnError ? <div className="mk-warning">{accountInnError}</div> : null}
                   <div className="mk-inline-actions">
                     <button type="submit" disabled={accountSaving}>{accountSaving ? "Сохранение..." : "Сохранить изменения"}</button>
                     <button
