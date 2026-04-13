@@ -250,12 +250,22 @@ function LotPicker({
             queue.push(node.id);
           }
         });
+        if (active) {
+          // Show root categories immediately instead of waiting for full recursion.
+          setNodes(Array.from(byId.values()));
+        }
 
         // Load children for each discovered node because backend returns roots by default.
         while (queue.length) {
           const parentId = queue.shift();
           if (parentId == null) continue;
-          const children = await fetchCatalogNodes({ parent_id: parentId, limit: 500 }, baseUrl, token);
+          let children;
+          try {
+            children = await fetchCatalogNodes({ parent_id: parentId, limit: 500 }, baseUrl, token);
+          } catch {
+            // Skip failed branch but keep already loaded categories.
+            continue;
+          }
           children.results.forEach((node) => {
             if (byId.has(node.id)) return;
             byId.set(node.id, node);
@@ -265,7 +275,7 @@ function LotPicker({
 
         if (active) setNodes(Array.from(byId.values()));
       } catch {
-        if (active) setNodes([]);
+        if (active) setNodes((prev) => prev);
       }
     };
     void loadNodes();
