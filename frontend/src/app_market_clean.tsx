@@ -308,10 +308,24 @@ function LotPicker({
   }, [selectedLots, baseUrl, token]);
 
   const selectedIds = useMemo(() => new Set(selectedLots.map((lot) => lot.id)), [selectedLots]);
+  const nodeById = useMemo(() => {
+    const map = new Map<number, CatalogNode>();
+    nodes.forEach((node) => map.set(node.id, node));
+    return map;
+  }, [nodes]);
   const selectableNodes = useMemo(
     () => nodes.filter((node) => !node.has_children || node.items_count > 0),
     [nodes],
   );
+
+  function itemHierarchyText(item?: CatalogItem) {
+    if (!item) return "";
+    const node = nodeById.get(item.node_id);
+    if (!node) return "";
+    const parent = node.parent_id != null ? nodeById.get(node.parent_id) : undefined;
+    if (parent?.name && node.name) return `${parent.name} -> ${node.name}`;
+    return node.name ?? "";
+  }
 
   function addLot(item: CatalogItem) {
     if (selectedIds.has(item.id)) return;
@@ -397,6 +411,7 @@ function LotPicker({
                     <div>
                       <strong>{item.name}</strong>
                       <span>{item.code} · {item.unit}</span>
+                      {itemHierarchyText(item) ? <span>{itemHierarchyText(item)}</span> : null}
                     </div>
                     <button type="button" className="mk-ghost" onClick={() => addLot(item)} disabled={disabled || selectedIds.has(item.id)}>
                       {selectedIds.has(item.id) ? "Добавлен" : "Добавить"}
@@ -420,6 +435,7 @@ function LotPicker({
                 <div>
                   <strong>{item?.name ?? `Позиция #${lot.id}`}</strong>
                   <span>{item?.code ?? "Код отсутствует"}</span>
+                  {itemHierarchyText(item) ? <span>{itemHierarchyText(item)}</span> : null}
                 </div>
                 <div className="mk-selected-lot-controls">
                   <input
