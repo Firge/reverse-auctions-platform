@@ -83,7 +83,7 @@ def cancel_payment(payment_id: str) -> dict:
         raise
 
 
-def capture_payment(payment_id: str, amount: float = None):
+def capture_payment(payment_id: str, amount: Decimal = None):
     capture_data = {}
     if amount is not None:
         capture_data["amount"] = {

@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
@@ -154,10 +155,12 @@ class AuctionViewSet(viewsets.ModelViewSet):
             return Response({"error": "Опубликовать можно только черновик аукциона."}, status=status.HTTP_400_BAD_REQUEST)
 
         base_url = request.build_absolute_uri('/')
-        return_url = base_url + f'auction/{auction.id}/'
+        return_url = base_url + f'auction/{auction.id}'
+        payment_amount = Decimal(auction.start_price) * Decimal(os.getenv("PAYMENT_AUCTION_FORFEIT_PERCENT", 5)) / Decimal(100)
         payment_data = freeze_funds(
             request.user.id,
             auction.id,
+            amount=payment_amount,
             description=f"Заморозка для публикации аукциона #{auction.id}",
             return_url=return_url
         )
@@ -209,10 +212,12 @@ class AuctionViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         try:
             base_url = request.build_absolute_uri('/')
-            return_url = base_url + f'auction/{auction.id}/'
+            return_url = base_url + f'auction/{auction.id}'
+            payment_amount = Decimal(auction.start_price) * Decimal(os.getenv("PAYMENT_BID_FORFEIT_PERCENT", 5)) / Decimal(100)
             payment_data = freeze_funds(
                 request.user.id,
                 auction.id,
+                amount=payment_amount,
                 description=f"Заморозка для участия в аукционе #{auction.id}",
                 return_url=return_url
             )

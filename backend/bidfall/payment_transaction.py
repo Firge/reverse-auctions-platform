@@ -158,12 +158,19 @@ class AuctionCreationHoldHandler(BasePaymentTransactionHandler):
         self.payment.save()
 
 
-@PaymentTransactionService.register_handler(PaymentTransaction.Type.AUCTION_SIGNED_RELEASE)
+@PaymentTransactionService.register_handler(PaymentTransaction.Type.AUCTION_SIGNED_CHARGE)
 class AuctionSignedReleaseHandler(BasePaymentTransactionHandler):
+    def handle_charged(self):
+        self.auction.status = Auction.Status.COMPLETED
+        self.auction.save()
+        logger.info(f"Auction #{self.auction.id} commission charged")
+        self.payment.status = PaymentTransaction.Status.CHARGED
+        self.payment.save()
+
     def handle_canceled(self):
         self.auction.status = Auction.Status.COMPLETED
         self.auction.save()
-        logger.info(f"Auction #{self.auction.id} canceled because of successful signing")
+        logger.info(f"Auction #{self.auction.id} canceled because of timeout")
         self.payment.status = PaymentTransaction.Status.CANCELED
         self.payment.save()
 
@@ -177,3 +184,12 @@ class AuctionForfeitChargeHandler(BasePaymentTransactionHandler):
         self.payment.status = PaymentTransaction.Status.CHARGED
         self.payment.save()
 
+
+@PaymentTransactionService.register_handler(PaymentTransaction.Type.AUCTION_NO_WINNERS_RELEASE)
+class AuctionForfeitChargeHandler(BasePaymentTransactionHandler):
+    def handle_canceled(self):
+        self.auction.status = Auction.Status.CANCELED
+        self.auction.save()
+        logger.info(f"Auction #{self.auction.id} canceled due to lack of a winner")
+        self.payment.status = PaymentTransaction.Status.CHARGED
+        self.payment.save()
