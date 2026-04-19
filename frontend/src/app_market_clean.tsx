@@ -1,4 +1,4 @@
-﻿import { FormEvent, ReactNode, startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+﻿import { FormEvent, ReactNode, startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   closeAuction,
   createAuction,
@@ -235,75 +235,79 @@ function LotPicker({
   const [selectedDetails, setSelectedDetails] = useState<Record<number, CatalogItem>>({});
   const deferredQuery = useDeferredValue(query);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const loadedParentIdsRef = useRef<Set<number | null>>(new Set());
+
+  function mergeNodes(newNodes: CatalogNode[]) {
+    setNodes((prev) => {
+      const map = new Map<number, CatalogNode>();
+      prev.forEach((node) => map.set(node.id, node));
+      newNodes.forEach((node) => map.set(node.id, node));
+      return Array.from(map.values());
+    });
+  }
+
+  async function fetchNodePages(parentId?: number) {
+    const PAGE_SIZE = 500;
+    const aggregated: CatalogNode[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await fetchCatalogNodes(
+        {
+          parent_id: parentId,
+          limit: PAGE_SIZE,
+          offset,
+        },
+        baseUrl,
+        token,
+      );
+      aggregated.push(...page.results);
+      if (page.results.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+    return aggregated;
+  }
 
   useEffect(() => {
     let active = true;
-    const loadNodes = async () => {
-      const PAGE_SIZE = 500;
-      const fetchNodePages = async (parentId?: number) => {
-        const aggregated: CatalogNode[] = [];
-        let offset = 0;
-        while (true) {
-          const page = await fetchCatalogNodes(
-            {
-              parent_id: parentId,
-              limit: PAGE_SIZE,
-              offset,
-            },
-            baseUrl,
-            token,
-          );
-          aggregated.push(...page.results);
-          if (page.results.length < PAGE_SIZE) break;
-          offset += PAGE_SIZE;
-        }
-        return aggregated;
-      };
-
+    const loadRootNodes = async () => {
       try {
-        const byId = new Map<number, CatalogNode>();
-        const queue: number[] = [];
-
         const roots = await fetchNodePages(undefined);
-        roots.forEach((node) => {
-          if (!byId.has(node.id)) {
-            byId.set(node.id, node);
-            queue.push(node.id);
-          }
-        });
-        if (active) {
-          // Show root categories immediately instead of waiting for full recursion.
-          setNodes(Array.from(byId.values()));
-        }
-
-        // Load children for each discovered node because backend returns roots by default.
-        while (queue.length) {
-          const parentId = queue.shift();
-          if (parentId == null) continue;
-          let children: CatalogNode[];
-          try {
-            children = await fetchNodePages(parentId);
-          } catch {
-            // Skip failed branch but keep already loaded categories.
-            continue;
-          }
-          children.forEach((node) => {
-            if (byId.has(node.id)) return;
-            byId.set(node.id, node);
-            queue.push(node.id);
-          });
-        }
-
-        if (active) setNodes(Array.from(byId.values()));
+        if (!active) return;
+        setNodes(roots);
+        loadedParentIdsRef.current = new Set([null]);
       } catch {
-        if (active) setNodes((prev) => prev);
+        if (active) setNodes([]);
       }
     };
-    void loadNodes();
+    void loadRootNodes();
     return () => {
       active = false;
     };
   }, [baseUrl, token]);
+
+  useEffect(() => {
+    if (mode !== "tree") return;
+    if (nodeId == null) return;
+    const selectedNode = nodes.find((node) => node.id === nodeId);
+    if (!selectedNode?.has_children) return;
+    if (loadedParentIdsRef.current.has(nodeId)) return;
+
+    let active = true;
+    const loadChildren = async () => {
+      try {
+        const children = await fetchNodePages(nodeId);
+        if (!active) return;
+        mergeNodes(children);
+        loadedParentIdsRef.current.add(nodeId);
+      } catch {
+        // Keep existing nodes; user can continue working with loaded branches.
+      }
+    };
+    void loadChildren();
+    return () => {
+      active = false;
+    };
+  }, [mode, nodeId, nodes, baseUrl, token]);
 
   useEffect(() => {
     let active = true;
@@ -367,11 +371,9 @@ function LotPicker({
     nodes.forEach((node) => map.set(node.id, node));
     return map;
   }, [nodes]);
-  const selectableNodes = useMemo(
-    () => nodes.filter((node) => !node.has_children || node.items_count > 0),
-    [nodes],
-  );
-  const categoryOptions = selectableNodes.length ? selectableNodes : nodes;
+  const categoryOptions = useMemo(() => {
+    return [...nodes].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [nodes]);
 
   function itemHierarchyText(item?: CatalogItem) {
     if (!item) return "";
