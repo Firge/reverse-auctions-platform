@@ -525,21 +525,7 @@ function LotPicker({
         <button
           type="button"
           className="mk-ghost"
-          onClick={() => {
-            setCatalogOpen((value) => {
-              const next = !value;
-              if (next) {
-                setNodeLoadState((prev) => ({
-                  ...prev,
-                  phase: "idle",
-                  error: "",
-                  requests: 0,
-                  lastParent: "-",
-                }));
-              }
-              return next;
-            });
-          }}
+          onClick={() => setCatalogOpen((value) => !value)}
           disabled={disabled}
         >
           {catalogOpen ? "Скрыть каталог" : "Открыть каталог"}
@@ -557,26 +543,6 @@ function LotPicker({
             <div className="mk-tabs">
               <button type="button" className={mode === "search" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("search")}>Поиск</button>
               <button type="button" className={mode === "tree" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("tree")}>Категория</button>
-            </div>
-
-            <div className="mk-note">
-              Загрузка категорий: {nodeLoadState.phase} · запросов: {nodeLoadState.requests} · узлов в памяти: {nodes.length} · parent: {nodeLoadState.lastParent}
-            </div>
-            {nodeLoadState.error ? <div className="mk-warning">{nodeLoadState.error}</div> : null}
-            <div className="mk-inline-actions">
-              <button
-                type="button"
-                className="mk-ghost"
-                onClick={() => {
-                  loadedParentIdsRef.current = new Set();
-                  setNodes([]);
-                  setNodeId(undefined);
-                  setNodesReloadTick((tick) => tick + 1);
-                }}
-                disabled={disabled}
-              >
-                Перезагрузить категории
-              </button>
             </div>
 
             {mode === "search" ? (
