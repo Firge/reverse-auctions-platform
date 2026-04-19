@@ -355,11 +355,11 @@ function LotPicker({
   function itemHierarchyText(item?: CatalogItem) {
     if (!item) return "";
     const node = nodeById.get(item.node_id);
-    if (!node) return "";
+    if (!node) return "DEBUG_NO_PARENT_NODE -> DEBUG_NO_NODE";
     const parent = node.parent_id != null ? nodeById.get(node.parent_id) : undefined;
     const parentName = parent?.name?.trim() ? parent.name : "DEBUG_NO_PARENT_NODE";
     if (node.name) return `${parentName} -> ${node.name}`;
-    return node.name ?? "";
+    return `${parentName} -> DEBUG_NO_NODE`;
   }
 
   function itemDisplayName(item?: CatalogItem) {
