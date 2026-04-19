@@ -311,29 +311,34 @@ function LotPicker({
         setNodeLoadState((prev) => ({ ...prev, phase: "loading-roots", error: "" }));
         const roots = await fetchNodePages(undefined);
         if (!active) return;
-        setNodes(roots);
+        const byId = new Map<number, CatalogNode>();
+        roots.forEach((node) => byId.set(node.id, node));
+        const queue = roots.filter((node) => node.has_children).map((node) => node.id);
+        const processedParents = new Set<number>();
 
+        while (queue.length) {
+          const parentId = queue.shift();
+          if (parentId == null || processedParents.has(parentId)) continue;
+          processedParents.add(parentId);
 
-        const secondLevelResults = await Promise.allSettled(
-          roots
-            .filter((node) => node.has_children)
-            .map((node) => fetchNodePages(node.id)),
-        );
-        if (!active) return;
+          const children = await fetchNodePages(parentId);
+          if (!active) return;
 
-        const secondLevelNodes: CatalogNode[] = [];
-        secondLevelResults.forEach((result) => {
-          if (result.status === "fulfilled") {
-            secondLevelNodes.push(...result.value);
-          }
-        });
+          children.forEach((node) => {
+            if (!byId.has(node.id)) {
+              byId.set(node.id, node);
+              if (node.has_children) queue.push(node.id);
+            }
+          });
+        }
 
-        mergeNodes(secondLevelNodes);
-        loadedParentIdsRef.current = new Set([null, ...roots.map((node) => node.id)]);
+        const allNodes = Array.from(byId.values());
+        setNodes(allNodes);
+        loadedParentIdsRef.current = new Set([null, ...processedParents]);
         setNodeLoadState((prev) => ({
           ...prev,
           phase: "done",
-          loadedNodes: roots.length + secondLevelNodes.length,
+          loadedNodes: allNodes.length,
         }));
       } catch {
         if (active) {
@@ -459,9 +464,22 @@ function LotPicker({
     nodes.forEach((node) => map.set(node.id, node));
     return map;
   }, [nodes]);
+  function nodePathLabel(node: CatalogNode) {
+    const parts: string[] = [];
+    const seen = new Set<number>();
+    let cursor: CatalogNode | undefined = node;
+    while (cursor && !seen.has(cursor.id)) {
+      seen.add(cursor.id);
+      parts.push(cursor.name);
+      cursor = cursor.parent_id != null ? nodeById.get(cursor.parent_id) : undefined;
+    }
+    return parts.reverse().join(" / ");
+  }
   const categoryOptions = useMemo(() => {
-    return [...nodes].sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [nodes]);
+    return [...nodes]
+      .filter((node) => (node.items_count ?? 0) > 0)
+      .sort((a, b) => nodePathLabel(a).localeCompare(nodePathLabel(b), "ru"));
+  }, [nodes, nodeById]);
 
   function resolvedNodeName(item?: CatalogItem) {
     const fromItem = item?.node_name?.trim();
@@ -561,9 +579,9 @@ function LotPicker({
                   onChange={(e) => setNodeId(e.target.value ? Number(e.target.value) : undefined)}
                   disabled={disabled}
                 >
-                  <option value="">Все конечные категории</option>
+                  <option value="">Выберите категорию</option>
                   {categoryOptions.map((node) => (
-                    <option key={node.id} value={node.id}>{node.name}</option>
+                    <option key={node.id} value={node.id}>{nodePathLabel(node)}</option>
                   ))}
                 </select>
               </label>
