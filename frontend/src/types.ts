@@ -60,6 +60,9 @@ export type CatalogItem = {
   name: string;
   unit: string;
   node_id: number;
+  node_name?: string | null;
+  parent_node_id?: number | null;
+  parent_node_name?: string | null;
   source_id: number | null;
   default_quantity?: string | null;
 };
