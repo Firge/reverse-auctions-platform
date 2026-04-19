@@ -301,8 +301,29 @@ function LotPicker({
         const roots = await fetchNodePages(undefined);
         if (!active) return;
         setNodes(roots);
-        loadedParentIdsRef.current = new Set([null]);
-        setNodeLoadState((prev) => ({ ...prev, phase: "done", loadedNodes: roots.length }));
+
+
+        const secondLevelResults = await Promise.allSettled(
+          roots
+            .filter((node) => node.has_children)
+            .map((node) => fetchNodePages(node.id)),
+        );
+        if (!active) return;
+
+        const secondLevelNodes: CatalogNode[] = [];
+        secondLevelResults.forEach((result) => {
+          if (result.status === "fulfilled") {
+            secondLevelNodes.push(...result.value);
+          }
+        });
+
+        mergeNodes(secondLevelNodes);
+        loadedParentIdsRef.current = new Set([null, ...roots.map((node) => node.id)]);
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "done",
+          loadedNodes: roots.length + secondLevelNodes.length,
+        }));
       } catch {
         if (active) {
           setNodes([]);
@@ -422,26 +443,40 @@ function LotPicker({
     return [...nodes].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [nodes]);
 
-  function itemHierarchyText(item?: CatalogItem) {
+  function resolvedNodeName(item?: CatalogItem) {
+    const fromItem = item?.node_name?.trim();
+    if (fromItem) return fromItem;
+    const fromMap = item ? nodeById.get(item.node_id)?.name?.trim() : "";
+    return fromMap || "";
+  }
+
+  function resolvedParentNodeName(item?: CatalogItem) {
+    const fromItem = item?.parent_node_name?.trim();
+    if (fromItem) return fromItem;
     if (!item) return "";
     const node = nodeById.get(item.node_id);
-    if (!node) return "";
-    const parent = node.parent_id != null ? nodeById.get(node.parent_id) : undefined;
-    const parentName = parent?.name?.trim() ? parent.name : "";
-    if (node.name) return parentName ? `${parentName} -> ${node.name}` : node.name;
+    if (!node?.parent_id) return "";
+    return nodeById.get(node.parent_id)?.name?.trim() || "";
+  }
+
+  function itemHierarchyText(item?: CatalogItem) {
+    if (!item) return "";
+    const nodeName = resolvedNodeName(item);
+    const parentName = resolvedParentNodeName(item);
+    if (nodeName) return parentName ? `${parentName} -> ${nodeName}` : nodeName;
     return "";
   }
 
   function itemDisplayName(item?: CatalogItem) {
     if (!item) return "";
-    const node = nodeById.get(item.node_id);
-    if (!node?.name) return item.name;
+    const nodeName = resolvedNodeName(item);
+    if (!nodeName) return item.name;
     const normalizedItemName = (item.name ?? "").trim().toLowerCase();
-    const normalizedNodeName = node.name.trim().toLowerCase();
+    const normalizedNodeName = nodeName.toLowerCase();
     if (!normalizedItemName || normalizedItemName.includes(normalizedNodeName)) {
       return item.name;
     }
-    return `${node.name} - ${item.name}`;
+    return `${nodeName} - ${item.name}`;
   }
 
   function addLot(item: CatalogItem) {
