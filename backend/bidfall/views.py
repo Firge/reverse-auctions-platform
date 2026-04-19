@@ -372,7 +372,7 @@ class CatalogItemListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        queryset = CatalogItem.objects.select_related("node", "node_parent").all()
+        queryset = CatalogItem.objects.select_related("node", "node__parent").all()
 
         q = self.request.query_params.get('q')
         if q:
