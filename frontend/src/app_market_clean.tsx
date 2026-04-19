@@ -380,6 +380,15 @@ function LotPicker({
   useEffect(() => {
     let active = true;
     const loadItems = async () => {
+      if (mode === "tree" && nodeId == null) {
+        if (active) {
+          setItems([]);
+          setError("");
+          setLoading(false);
+        }
+        return;
+      }
+
       setLoading(true);
       setError("");
       try {
