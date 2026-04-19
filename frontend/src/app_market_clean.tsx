@@ -239,12 +239,33 @@ function LotPicker({
   useEffect(() => {
     let active = true;
     const loadNodes = async () => {
+      const PAGE_SIZE = 500;
+      const fetchNodePages = async (parentId?: number) => {
+        const aggregated: CatalogNode[] = [];
+        let offset = 0;
+        while (true) {
+          const page = await fetchCatalogNodes(
+            {
+              parent_id: parentId,
+              limit: PAGE_SIZE,
+              offset,
+            },
+            baseUrl,
+            token,
+          );
+          aggregated.push(...page.results);
+          if (page.results.length < PAGE_SIZE) break;
+          offset += PAGE_SIZE;
+        }
+        return aggregated;
+      };
+
       try {
         const byId = new Map<number, CatalogNode>();
         const queue: number[] = [];
 
-        const roots = await fetchCatalogNodes({ limit: 500 }, baseUrl, token);
-        roots.results.forEach((node) => {
+        const roots = await fetchNodePages(undefined);
+        roots.forEach((node) => {
           if (!byId.has(node.id)) {
             byId.set(node.id, node);
             queue.push(node.id);
@@ -259,14 +280,14 @@ function LotPicker({
         while (queue.length) {
           const parentId = queue.shift();
           if (parentId == null) continue;
-          let children;
+          let children: CatalogNode[];
           try {
-            children = await fetchCatalogNodes({ parent_id: parentId, limit: 500 }, baseUrl, token);
+            children = await fetchNodePages(parentId);
           } catch {
             // Skip failed branch but keep already loaded categories.
             continue;
           }
-          children.results.forEach((node) => {
+          children.forEach((node) => {
             if (byId.has(node.id)) return;
             byId.set(node.id, node);
             queue.push(node.id);
@@ -355,11 +376,11 @@ function LotPicker({
   function itemHierarchyText(item?: CatalogItem) {
     if (!item) return "";
     const node = nodeById.get(item.node_id);
-    if (!node) return "DEBUG_NO_PARENT_NODE -> DEBUG_NO_NODE";
+    if (!node) return "";
     const parent = node.parent_id != null ? nodeById.get(node.parent_id) : undefined;
-    const parentName = parent?.name?.trim() ? parent.name : "DEBUG_NO_PARENT_NODE";
-    if (node.name) return `${parentName} -> ${node.name}`;
-    return `${parentName} -> DEBUG_NO_NODE`;
+    const parentName = parent?.name?.trim() ? parent.name : "";
+    if (node.name) return parentName ? `${parentName} -> ${node.name}` : node.name;
+    return "";
   }
 
   function itemDisplayName(item?: CatalogItem) {
