@@ -262,9 +262,19 @@ function LotPicker({
 
   async function fetchNodePages(parentId?: number) {
     const PAGE_SIZE = 500;
+    const MAX_PAGES = 50;
     const aggregated: CatalogNode[] = [];
     let offset = 0;
+    let pages = 0;
     while (true) {
+      if (pages >= MAX_PAGES) {
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "error",
+          error: `Превышен лимит страниц при загрузке categories (parent=${parentId == null ? "root" : String(parentId)})`,
+        }));
+        break;
+      }
       setNodeLoadState((prev) => ({
         ...prev,
         requests: prev.requests + 1,
@@ -282,6 +292,7 @@ function LotPicker({
       aggregated.push(...page.results);
       if (page.results.length < PAGE_SIZE) break;
       offset += PAGE_SIZE;
+      pages += 1;
     }
     return aggregated;
   }
@@ -289,7 +300,7 @@ function LotPicker({
   useEffect(() => {
     let active = true;
     if (!catalogOpen) return () => { active = false; };
-    if (loadedParentIdsRef.current.has(null) && nodes.length > 0 && nodesReloadTick === 0) {
+    if (loadedParentIdsRef.current.has(null) && nodesReloadTick === 0) {
       return () => {
         active = false;
       };
@@ -339,7 +350,7 @@ function LotPicker({
     return () => {
       active = false;
     };
-  }, [baseUrl, token, catalogOpen, nodes.length, nodesReloadTick]);
+  }, [baseUrl, token, catalogOpen, nodesReloadTick]);
 
   useEffect(() => {
     if (!catalogOpen) return;
