@@ -167,9 +167,23 @@ class CatalogNodeSerializer(serializers.ModelSerializer):
 
 
 class CatalogItemSerializer(serializers.ModelSerializer):
+    node_name = serializers.CharField(source='node.name', read_only=True, allow_null=True)
+    parent_node_id = serializers.IntegerField(source='node.parent_id', read_only=True, allow_null=True)
+    parent_node_name = serializers.CharField(source='node.parent.name', read_only=True, allow_null=True)
+
     class Meta:
         model = CatalogItem
-        fields = ('id', 'code', 'name', 'unit', 'node_id', 'source_id')
+        fields = (
+            'id',
+            'code',
+            'name',
+            'unit',
+            'node_id',
+            'node_name',
+            'parent_node_id',
+            'parent_node_name',
+            'source_id',
+        )
 
 
 class AuctionItemSerializer(serializers.ModelSerializer):

@@ -402,7 +402,7 @@ class CatalogItemByIdsView(APIView):
         except ValueError:
             return Response({"error": "Некорректный формат ids."}, status=400)
 
-        items = CatalogItem.objects.filter(id__in=ids)
+        items = CatalogItem.objects.select_related('node', 'node__parent').filter(id__in=ids)
         serializer = CatalogItemSerializer(items, many=True)
         return Response(serializer.data)
 
