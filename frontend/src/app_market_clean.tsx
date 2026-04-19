@@ -357,7 +357,8 @@ function LotPicker({
     const node = nodeById.get(item.node_id);
     if (!node) return "";
     const parent = node.parent_id != null ? nodeById.get(node.parent_id) : undefined;
-    if (parent?.name && node.name) return `${parent.name} -> ${node.name}`;
+    const parentName = parent?.name?.trim() ? parent.name : "DEBUG_NO_PARENT_NODE";
+    if (node.name) return `${parentName} -> ${node.name}`;
     return node.name ?? "";
   }
 
