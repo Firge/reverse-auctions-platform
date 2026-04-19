@@ -236,6 +236,20 @@ function LotPicker({
   const deferredQuery = useDeferredValue(query);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const loadedParentIdsRef = useRef<Set<number | null>>(new Set());
+  const [nodesReloadTick, setNodesReloadTick] = useState(0);
+  const [nodeLoadState, setNodeLoadState] = useState<{
+    phase: "idle" | "loading-roots" | "loading-branch" | "done" | "error";
+    requests: number;
+    loadedNodes: number;
+    lastParent: string;
+    error: string;
+  }>({
+    phase: "idle",
+    requests: 0,
+    loadedNodes: 0,
+    lastParent: "-",
+    error: "",
+  });
 
   function mergeNodes(newNodes: CatalogNode[]) {
     setNodes((prev) => {
@@ -251,6 +265,11 @@ function LotPicker({
     const aggregated: CatalogNode[] = [];
     let offset = 0;
     while (true) {
+      setNodeLoadState((prev) => ({
+        ...prev,
+        requests: prev.requests + 1,
+        lastParent: parentId == null ? "root" : String(parentId),
+      }));
       const page = await fetchCatalogNodes(
         {
           parent_id: parentId,
@@ -269,23 +288,40 @@ function LotPicker({
 
   useEffect(() => {
     let active = true;
+    if (!catalogOpen) return () => { active = false; };
+    if (loadedParentIdsRef.current.has(null) && nodes.length > 0 && nodesReloadTick === 0) {
+      return () => {
+        active = false;
+      };
+    }
+
     const loadRootNodes = async () => {
       try {
+        setNodeLoadState((prev) => ({ ...prev, phase: "loading-roots", error: "" }));
         const roots = await fetchNodePages(undefined);
         if (!active) return;
         setNodes(roots);
         loadedParentIdsRef.current = new Set([null]);
+        setNodeLoadState((prev) => ({ ...prev, phase: "done", loadedNodes: roots.length }));
       } catch {
-        if (active) setNodes([]);
+        if (active) {
+          setNodes([]);
+          setNodeLoadState((prev) => ({
+            ...prev,
+            phase: "error",
+            error: "Не удалось загрузить корневые категории",
+          }));
+        }
       }
     };
     void loadRootNodes();
     return () => {
       active = false;
     };
-  }, [baseUrl, token]);
+  }, [baseUrl, token, catalogOpen, nodes.length, nodesReloadTick]);
 
   useEffect(() => {
+    if (!catalogOpen) return;
     if (mode !== "tree") return;
     if (nodeId == null) return;
     const selectedNode = nodes.find((node) => node.id === nodeId);
@@ -295,19 +331,30 @@ function LotPicker({
     let active = true;
     const loadChildren = async () => {
       try {
+        setNodeLoadState((prev) => ({ ...prev, phase: "loading-branch", error: "" }));
         const children = await fetchNodePages(nodeId);
         if (!active) return;
         mergeNodes(children);
         loadedParentIdsRef.current.add(nodeId);
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "done",
+          loadedNodes: Math.max(prev.loadedNodes, nodes.length + children.length),
+        }));
       } catch {
-        // Keep existing nodes; user can continue working with loaded branches.
+        if (!active) return;
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "error",
+          error: `Не удалось загрузить дочерние категории для node_id=${nodeId}`,
+        }));
       }
     };
     void loadChildren();
     return () => {
       active = false;
     };
-  }, [mode, nodeId, nodes, baseUrl, token]);
+  }, [catalogOpen, mode, nodeId, nodes, baseUrl, token]);
 
   useEffect(() => {
     let active = true;
@@ -423,7 +470,21 @@ function LotPicker({
         <button
           type="button"
           className="mk-ghost"
-          onClick={() => setCatalogOpen((value) => !value)}
+          onClick={() => {
+            setCatalogOpen((value) => {
+              const next = !value;
+              if (next) {
+                setNodeLoadState((prev) => ({
+                  ...prev,
+                  phase: "idle",
+                  error: "",
+                  requests: 0,
+                  lastParent: "-",
+                }));
+              }
+              return next;
+            });
+          }}
           disabled={disabled}
         >
           {catalogOpen ? "Скрыть каталог" : "Открыть каталог"}
@@ -441,6 +502,26 @@ function LotPicker({
             <div className="mk-tabs">
               <button type="button" className={mode === "search" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("search")}>Поиск</button>
               <button type="button" className={mode === "tree" ? "mk-tab active" : "mk-tab"} onClick={() => setMode("tree")}>Категория</button>
+            </div>
+
+            <div className="mk-note">
+              Загрузка категорий: {nodeLoadState.phase} · запросов: {nodeLoadState.requests} · узлов в памяти: {nodes.length} · parent: {nodeLoadState.lastParent}
+            </div>
+            {nodeLoadState.error ? <div className="mk-warning">{nodeLoadState.error}</div> : null}
+            <div className="mk-inline-actions">
+              <button
+                type="button"
+                className="mk-ghost"
+                onClick={() => {
+                  loadedParentIdsRef.current = new Set();
+                  setNodes([]);
+                  setNodeId(undefined);
+                  setNodesReloadTick((tick) => tick + 1);
+                }}
+                disabled={disabled}
+              >
+                Перезагрузить категории
+              </button>
             </div>
 
             {mode === "search" ? (
