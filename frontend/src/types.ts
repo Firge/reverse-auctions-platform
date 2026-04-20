@@ -92,6 +92,32 @@ export type CatalogNodesQuery = {
   offset?: number;
 };
 
+export type ConfirmationStatus = {
+  creator_signed_at: string | null;
+  winner_signed_at: string | null;
+  signing_deadline: string;
+  status: string | null;
+  creator_cert_thumbprint?: string | null;
+  winner_cert_thumbprint?: string | null;
+  creator_signature_present?: boolean;
+  winner_signature_present?: boolean;
+};
+
+export type ConfirmationSignaturePayload = {
+  document_text: string;
+  signature: string;
+  cert_thumbprint?: string;
+  signature_type?: string;
+};
+
+export type CryptoCertificateInfo = {
+  thumbprint: string;
+  subjectName: string;
+  issuerName: string;
+  validFrom: string;
+  validTo: string;
+};
+
 export type Auction = {
   id: number;
   owner: number;
