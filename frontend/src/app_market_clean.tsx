@@ -31,7 +31,7 @@ import {
   updateCurrentUser,
   validateAuctionLots,
 } from "./api";
-import { listCryptoProCertificates, signWithCryptoPro } from "./cryptoPro";
+import { listCryptoProCertificates, signWithCryptoPro } from "./cryptopro";
 import type {
   Auction,
   AuctionCreatePayload,
@@ -1187,7 +1187,7 @@ export function App() {
         document_text: documentText,
         signature,
         cert_thumbprint: selectedCertThumbprint,
-        signature_type: "CAdES-BES-detached",
+        signature_type: "CAdES-BES-attached",
       };
       if (role === "creator") {
         await confirmAuctionCreator(auction.id, tokens.access, payload, apiBase);
