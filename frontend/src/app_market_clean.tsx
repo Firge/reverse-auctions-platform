@@ -78,6 +78,7 @@ type DraftEditForm = {
 };
 
 const INN_REGEX = /^(?:\d{10}|\d{12})$/;
+const INN_INPUT_PATTERN = "[0-9]{10}|[0-9]{12}";
 
 function dt(minutesAhead: number) {
   const d = new Date(Date.now() + minutesAhead * 60_000);
@@ -1293,7 +1294,7 @@ export function App() {
                     <label className="mk-field-label">Пароль<input type="password" value={registerForm.password} onChange={(e) => setRegisterForm((f) => ({ ...f, password: e.target.value }))} /></label>
                     <label className="mk-field-label">Роль<select value={registerForm.role} onChange={(e) => setRegisterForm((f) => ({ ...f, role: e.target.value as UserRole }))}><option value="supplier">Поставщик</option><option value="buyer">Покупатель</option></select></label>
                     <label className="mk-field-label">Компания<input value={registerForm.company_name ?? ""} onChange={(e) => setRegisterForm((f) => ({ ...f, company_name: e.target.value }))} /></label>
-                    <label className="mk-field-label">ИНН<input value={registerForm.inn ?? ""} inputMode="numeric" pattern="^(?:\\d{10}|\\d{12})$" onChange={(e) => setRegisterForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} /></label>
+                    <label className="mk-field-label">ИНН<input value={registerForm.inn ?? ""} inputMode="numeric" pattern={INN_INPUT_PATTERN} onChange={(e) => setRegisterForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} /></label>
                   </div>
                   {registerInnLoading ? <div className="mk-note">Проверяем ИНН в DaData...</div> : null}
                   {registerInnResolved ? <div className="mk-note">Организация найдена: {registerInnResolved}</div> : null}
@@ -1350,7 +1351,7 @@ export function App() {
                       <input value={accountForm.company_name} onChange={(e) => setAccountForm((f) => ({ ...f, company_name: e.target.value }))} />
                     </label>
                     <label className="mk-field-label">ИНН
-                      <input value={accountForm.inn} inputMode="numeric" pattern="^(?:\\d{10}|\\d{12})$" onChange={(e) => setAccountForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} />
+                      <input value={accountForm.inn} inputMode="numeric" pattern={INN_INPUT_PATTERN} onChange={(e) => setAccountForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} />
                     </label>
                     <label className="mk-field-label">Новый пароль (необязательно)
                       <input type="password" value={accountForm.password} onChange={(e) => setAccountForm((f) => ({ ...f, password: e.target.value }))} placeholder="Оставьте пустым, если не хотите менять пароль" />
