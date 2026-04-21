@@ -147,7 +147,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Администратор",
 };
 
-const money = (v: string | number | null | undefined) => v == null ? "-" : new Intl.NumberFormat("ru-RU", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(v) || 0);
+const money = (v: string | number | null | undefined) => v == null ? "-" : new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Number(v) || 0);
 const dateText = (v?: string | null) => !v ? "-" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(v));
 const statusText = (s?: string | null) => s ? (STATUS_LABELS[s] ?? s.replace(/_/g, " ")) : "-";
 const roleText = (r?: string | null) => r ? (ROLE_LABELS[r] ?? r) : "-";
