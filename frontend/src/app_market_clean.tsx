@@ -1230,7 +1230,6 @@ export function App() {
             <p>Поставщики соревнуются ценой — вы получаете лучшие условия. Прозрачная торговая площадка для B2B закупок стройматериалов и оборудования.</p>
             <div className="mk-hero-tags">
               <span>Стройматериалы</span>
-              <span>Электротехника</span>
               <span>Оборудование</span>
               <span>Расходники</span>
             </div>
@@ -1243,7 +1242,7 @@ export function App() {
             <div><small>Идёт сейчас</small><strong>{activeAuctions.length}</strong></div>
             <div><small>Всего на платформе</small><strong>{allAuctions.length}</strong></div>
             <div><small>Формат</small><strong>Реверсный</strong></div>
-            <div><small>Валюта</small><strong>USD</strong></div>
+            <div><small>Валюта</small><strong>₽</strong></div>
           </div>
         </div>
         <Card title="Идущие сейчас аукционы" subtitle="Аукционы, которые идут прямо сейчас." action={<button type="button" className="mk-ghost" onClick={() => go({ name: "browse" })}>Показать все</button>}>
