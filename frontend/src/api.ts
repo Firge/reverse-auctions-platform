@@ -235,6 +235,19 @@ export async function loginUser(
   });
 }
 
+export async function refreshAccessToken(refreshToken: string, baseUrl?: string) {
+  return request<TokenPair>("/api/auth/token/refresh/", {
+    method: "POST",
+    body: JSON.stringify({ refresh: refreshToken }),
+    baseUrl,
+  });
+}
+
+export function isAuthError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (error as Error & { status?: number }).status === 401;
+}
+
 export async function fetchActiveAuctions(baseUrl?: string) {
   const data = await request<MaybePaginated<Auction>>("/api/auctions/active/", { method: "GET", baseUrl });
   return normalizeListPayload(data);

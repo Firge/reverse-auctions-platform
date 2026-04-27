@@ -20,9 +20,11 @@ import {
   fetchServerTime,
   getStoredApiBase,
   getStoredTokens,
+  isAuthError,
   loginUser,
   normalizeAuction,
   publishAuction,
+  refreshAccessToken,
   registerUser,
   setStoredTokens,
   submitBid,
@@ -677,6 +679,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
   const [apiBase] = useState(getStoredApiBase());
   const [tokens, setTokens] = useState<TokenPair | null>(getStoredTokens());
+  const tokensRef = useRef<TokenPair | null>(tokens);
   const [toast, setToast] = useState<Toast>(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
@@ -739,8 +742,30 @@ export function App() {
   const userId = Number.isFinite(tokenUserId) ? tokenUserId : (typeof currentUser?.id === "number" ? currentUser.id : undefined);
   const serverNowMs = clockNowMs + serverOffsetMs;
 
+  useEffect(() => { tokensRef.current = tokens; }, [tokens]);
+
   function go(next: Route) { window.history.pushState(null, "", routePath(next)); setRoute(next); }
   function openAuction(id: number) { setSelectedId(id); go({ name: "auction", id }); }
+
+  async function tryRefreshToken(): Promise<TokenPair | null> {
+    const current = tokensRef.current;
+    if (!current?.refresh) return null;
+    try {
+      const newPair = await refreshAccessToken(current.refresh, apiBase);
+      setStoredTokens(newPair);
+      setTokens(newPair);
+      tokensRef.current = newPair;
+      return newPair;
+    } catch {
+      setStoredTokens(null);
+      setTokens(null);
+      tokensRef.current = null;
+      setCurrentUser(null);
+      setOwnedAuctions([]);
+      setParticipatingAuctions([]);
+      return null;
+    }
+  }
 
   useEffect(() => {
     const pop = () => setRoute(parseRoute(window.location.pathname));
@@ -808,12 +833,35 @@ export function App() {
   async function refreshAuctions() {
     setLoadingAuctions(true);
     try {
-      const [all, active] = await Promise.all([fetchAuctions(apiBase, tokens?.access ?? undefined), fetchActiveAuctions(apiBase)]);
-      const allN = all.map(normalizeAuction); const activeN = active.map(normalizeAuction);
-      setAllAuctions(allN); setActiveAuctions(activeN);
+      let token = tokensRef.current?.access ?? undefined;
+      const [allResult, activeResult] = await Promise.allSettled([
+        fetchAuctions(apiBase, token),
+        fetchActiveAuctions(apiBase),
+      ]);
+
+      let allList: Auction[];
+      if (allResult.status === "fulfilled") {
+        allList = allResult.value;
+      } else if (isAuthError(allResult.reason) && tokensRef.current?.refresh) {
+        const newPair = await tryRefreshToken();
+        allList = newPair ? await fetchAuctions(apiBase, newPair.access) : [];
+      } else if (allResult.status === "rejected") {
+        throw allResult.reason;
+      } else {
+        allList = [];
+      }
+
+      const activeList = activeResult.status === "fulfilled" ? activeResult.value : [];
+      const allN = allList.map(normalizeAuction);
+      const activeN = activeList.map(normalizeAuction);
+      setAllAuctions(allN);
+      setActiveAuctions(activeN);
       if (!selectedId && activeN[0]) setSelectedId(activeN[0].id);
-    } catch (e) { setToast({ kind: "error", text: `Не удалось загрузить аукционы: ${toRussianErrorMessage(e)}` }); }
-    finally { setLoadingAuctions(false); }
+    } catch (e) {
+      setToast({ kind: "error", text: `Не удалось загрузить аукционы: ${toRussianErrorMessage(e)}` });
+    } finally {
+      setLoadingAuctions(false);
+    }
   }
   async function loadAuction(id: number, silent = false) {
     if (!silent) setLoadingAuction(true);
