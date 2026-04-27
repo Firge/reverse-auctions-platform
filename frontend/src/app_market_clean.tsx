@@ -187,11 +187,12 @@ function Tile({
   nowMs: number;
   editAction?: { onClick: () => void; label?: string };
 }) {
+  const isActive = a.status === "ACTIVE";
   return (
     <div className="mk-auction-card-shell">
-      <button type="button" className="mk-auction-card" onClick={open}>
+      <button type="button" className={`mk-auction-card${isActive ? " active" : ""}`} onClick={open}>
         <div className="mk-product-media" aria-hidden="true"><div className="mk-product-badge">Реверс</div><div className="mk-product-icon">{(a.title || "A")[0].toUpperCase()}</div></div>
-        <div className="mk-auction-head"><span className="mk-id">Лот</span><Status s={a.status} /></div>
+        <div className="mk-auction-head"><span className="mk-id">#{a.id}</span><Status s={a.status} /></div>
         <h4>{a.title}</h4><p>{a.description || "Нет описания"}</p>
         <div className="mk-auction-meta"><span>{money(a.current_price ?? a.start_price)}</span><span>{timeLeft(a.end_date, nowMs)}</span></div>
       </button>
@@ -906,6 +907,28 @@ export function App() {
       </header>
 
       {route.name === "home" ? <>
+        <div className="mk-hero mk-hero-market">
+          <div className="mk-hero-copy">
+            <h1>Умные закупки через <em>реверсный аукцион</em></h1>
+            <p>Поставщики соревнуются ценой — вы получаете лучшие условия. Прозрачная торговая площадка для B2B закупок стройматериалов и оборудования.</p>
+            <div className="mk-hero-tags">
+              <span>Стройматериалы</span>
+              <span>Электротехника</span>
+              <span>Оборудование</span>
+              <span>Расходники</span>
+            </div>
+            <div className="mk-hero-cta">
+              <button type="button" className="mk-btn-amber" onClick={() => go({ name: "browse" })}>Просмотреть аукционы</button>
+              <button type="button" className="mk-ghost" onClick={() => go({ name: "sell" })}>Создать аукцион</button>
+            </div>
+          </div>
+          <div className="mk-hero-stats">
+            <div><small>Идёт сейчас</small><strong>{activeAuctions.length}</strong></div>
+            <div><small>Всего на платформе</small><strong>{allAuctions.length}</strong></div>
+            <div><small>Формат</small><strong>Реверсный</strong></div>
+            <div><small>Валюта</small><strong>USD</strong></div>
+          </div>
+        </div>
         <Card title="Идущие сейчас аукционы" subtitle="Аукционы, которые идут прямо сейчас." action={<button type="button" className="mk-ghost" onClick={() => go({ name: "browse" })}>Показать все</button>}>
           {loadingAuctions ? <div className="mk-empty">Загрузка аукционов...</div> : null}
           {!loadingAuctions && !liveHome.length ? <div className="mk-empty">Сейчас нет активных аукционов.</div> : null}
