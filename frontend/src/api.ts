@@ -10,6 +10,8 @@ import type {
   CatalogNode,
   CatalogNodesQuery,
   CatalogNodesResponse,
+  ConfirmationSignaturePayload,
+  ConfirmationStatus,
   CurrentUser,
   CurrentUserUpdatePayload,
   PartyLookupResponse,
@@ -334,6 +336,46 @@ export async function fetchAuctionWinner(
   return request<Bid>(`/api/auctions/${id}/winner/`, {
     method: "GET",
     token,
+    baseUrl,
+  });
+}
+
+export async function fetchAuctionConfirmationStatus(
+  id: number,
+  token: string,
+  baseUrl?: string,
+) {
+  return request<ConfirmationStatus>(`/api/auctions/${id}/confirmation/`, {
+    method: "GET",
+    token,
+    baseUrl,
+  });
+}
+
+export async function confirmAuctionCreator(
+  id: number,
+  token: string,
+  payload: ConfirmationSignaturePayload,
+  baseUrl?: string,
+) {
+  return request<{ status: string }>(`/api/auctions/${id}/confirm-creator/`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+    baseUrl,
+  });
+}
+
+export async function confirmAuctionWinner(
+  id: number,
+  token: string,
+  payload: ConfirmationSignaturePayload,
+  baseUrl?: string,
+) {
+  return request<{ status: string }>(`/api/auctions/${id}/confirm-winner/`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
     baseUrl,
   });
 }

@@ -60,6 +60,9 @@ export type CatalogItem = {
   name: string;
   unit: string;
   node_id: number;
+  node_name?: string | null;
+  parent_node_id?: number | null;
+  parent_node_name?: string | null;
   source_id: number | null;
   default_quantity?: string | null;
 };
@@ -87,6 +90,32 @@ export type CatalogNodesQuery = {
   q?: string;
   limit?: number;
   offset?: number;
+};
+
+export type ConfirmationStatus = {
+  creator_signed_at: string | null;
+  winner_signed_at: string | null;
+  signing_deadline: string;
+  status: string | null;
+  creator_cert_thumbprint?: string | null;
+  winner_cert_thumbprint?: string | null;
+  creator_signature_present?: boolean;
+  winner_signature_present?: boolean;
+};
+
+export type ConfirmationSignaturePayload = {
+  document_text: string;
+  signature: string;
+  cert_thumbprint?: string;
+  signature_type?: string;
+};
+
+export type CryptoCertificateInfo = {
+  thumbprint: string;
+  subjectName: string;
+  issuerName: string;
+  validFrom: string;
+  validTo: string;
 };
 
 export type Auction = {

@@ -265,11 +265,6 @@ jobs:
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d postgres redis
             echo "[deploy] postgres/redis started"
 
-            if [ "${RUN_INIT_CATALOG:-false}" = "true" ]; then
-              docker compose --env-file .env.prod -f docker-compose.prod.yaml pull init-catalog
-              echo "[deploy] tools image pulled"
-            fi
-
             if [ -n "${COMPOSE_SERVICES:-}" ]; then
               SERVICE_ARGS="$(echo "$COMPOSE_SERVICES" | tr ',' ' ')"
               docker compose --env-file .env.prod -f docker-compose.prod.yaml pull $SERVICE_ARGS
@@ -291,7 +286,13 @@ jobs:
                 echo "Catalog already exists in DB. Skipping init-catalog."
               else
                 echo "Catalog not found or empty. Running init-catalog."
-                docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
+                INIT_TAG="$IMAGE_TAG"
+                if ! IMAGE_TAG="$INIT_TAG" docker compose --env-file .env.prod -f docker-compose.prod.yaml pull init-catalog; then
+                  echo "[deploy] tools image with tag $INIT_TAG not found, fallback to latest"
+                  INIT_TAG="latest"
+                  IMAGE_TAG="$INIT_TAG" docker compose --env-file .env.prod -f docker-compose.prod.yaml pull init-catalog
+                fi
+                IMAGE_TAG="$INIT_TAG" docker compose --env-file .env.prod -f docker-compose.prod.yaml run --rm init-catalog
               fi
             fi
 

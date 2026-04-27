@@ -1,5 +1,6 @@
 import datetime
 import os
+from decimal import Decimal
 from typing import List
 
 from django.db import transaction
@@ -34,11 +35,12 @@ def update_confirmation_flow(confirmation: ConfirmationFlow):
         )
 
     if confirmation.creator_signed_at and confirmation.winner_signed_at:
-        cancel_payment(creator_payment.payment_id)
+        capture_amount = Decimal(auction.current_price) * Decimal(os.getenv("PAYMENT_AUCTION_SIGNED_PERCENT", 2)) / Decimal(100)
+        capture_payment(creator_payment.payment_id, amount=capture_amount)
         PaymentTransaction.objects.create(
             user=creator_payment.user,
             auction=auction,
-            type=PaymentTransaction.Type.AUCTION_SIGNED_RELEASE,
+            type=PaymentTransaction.Type.AUCTION_SIGNED_CHARGE,
             payment_id=creator_payment.payment_id,
         )
 
@@ -60,6 +62,18 @@ def update_confirmation_flow(confirmation: ConfirmationFlow):
         return
 
     if timezone.now() < confirmation.signing_deadline:
+        return
+
+    if not auction.winner_bid:
+        cancel_payment(creator_payment.payment_id)
+        PaymentTransaction.objects.create(
+            user=creator_payment.user,
+            auction=auction,
+            type=PaymentTransaction.Type.AUCTION_NO_WINNERS_RELEASE,
+            payment_id=creator_payment.payment_id,
+        )
+        confirmation.status = ConfirmationFlow.Status.FAILED
+        confirmation.save(update_fields=['status'])
         return
 
     strategy = AuctionStrategyFactory.get_strategy(auction)
@@ -111,7 +125,7 @@ def update_confirmation_flow(confirmation: ConfirmationFlow):
             PaymentTransaction.objects.create(
                 user=creator_payment.user,
                 auction=auction,
-                type=PaymentTransaction.Type.AUCTION_SIGNED_RELEASE,
+                type=PaymentTransaction.Type.AUCTION_NO_WINNERS_RELEASE,
                 payment_id=creator_payment.payment_id,
             )
             confirmation.status = ConfirmationFlow.Status.FAILED

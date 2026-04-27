@@ -1,10 +1,13 @@
-﻿import { FormEvent, ReactNode, startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+﻿import { FormEvent, ReactNode, startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   closeAuction,
+  confirmAuctionCreator,
+  confirmAuctionWinner,
   createAuction,
   fetchCatalogItems,
   fetchCatalogItemsByIds,
   fetchCatalogNodes,
+  fetchAuctionConfirmationStatus,
   fetchCurrentUser,
   fetchActiveAuctions,
   fetchAuction,
@@ -28,6 +31,7 @@ import {
   updateCurrentUser,
   validateAuctionLots,
 } from "./api";
+import { listCryptoProCertificates, signWithCryptoPro } from "./cryptopro";
 import type {
   Auction,
   AuctionCreatePayload,
@@ -36,6 +40,8 @@ import type {
   Bid,
   CatalogItem,
   CatalogNode,
+  ConfirmationStatus,
+  CryptoCertificateInfo,
   CurrentUser,
   CurrentUserUpdatePayload,
   JwtClaims,
@@ -72,6 +78,7 @@ type DraftEditForm = {
 };
 
 const INN_REGEX = /^(?:\d{10}|\d{12})$/;
+const INN_INPUT_PATTERN = "[0-9]{10}|[0-9]{12}";
 
 function dt(minutesAhead: number) {
   const d = new Date(Date.now() + minutesAhead * 60_000);
@@ -140,7 +147,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Администратор",
 };
 
-const money = (v: string | number | null | undefined) => v == null ? "-" : new Intl.NumberFormat("ru-RU", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(v) || 0);
+const money = (v: string | number | null | undefined) => v == null ? "-" : new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Number(v) || 0);
 const dateText = (v?: string | null) => !v ? "-" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(v));
 const statusText = (s?: string | null) => s ? (STATUS_LABELS[s] ?? s.replace(/_/g, " ")) : "-";
 const roleText = (r?: string | null) => r ? (ROLE_LABELS[r] ?? r) : "-";
@@ -150,6 +157,24 @@ function timeLeft(v?: string | null, nowMs = Date.now()) {
   if (s <= 0) return "Завершен";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h >= 24 ? `${Math.floor(h / 24)}д ${h % 24}ч осталось` : `${h}ч ${m}м осталось`;
+}
+
+function buildConfirmationDocumentText(auction: Auction, signerRole: "creator" | "winner") {
+  const lotsText = (auction.lots ?? [])
+    .map((lot, idx) => `${idx + 1}. ${lot.name} (${lot.code || "без кода"}), кол-во: ${lot.quantity} ${lot.unit}`)
+    .join("\n");
+  return [
+    "ПОДТВЕРЖДЕНИЕ РЕЗУЛЬТАТОВ АУКЦИОНА",
+    `Аукцион: #${auction.id} ${auction.title}`,
+    `Статус аукциона: ${statusText(auction.status)}`,
+    `Роль подписанта: ${signerRole === "creator" ? "Заказчик" : "Победитель"}`,
+    `Дата формирования: ${new Date().toISOString()}`,
+    "",
+    "Лоты:",
+    lotsText || "Лоты отсутствуют",
+    "",
+    "Подписант подтверждает результаты аукциона и согласие с условиями.",
+  ].join("\n");
 }
 
 function normalizeInnInput(value: string) {
@@ -236,26 +261,176 @@ function LotPicker({
   const [selectedDetails, setSelectedDetails] = useState<Record<number, CatalogItem>>({});
   const deferredQuery = useDeferredValue(query);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const loadedParentIdsRef = useRef<Set<number | null>>(new Set());
+  const [nodesReloadTick, setNodesReloadTick] = useState(0);
+  const [nodeLoadState, setNodeLoadState] = useState<{
+    phase: "idle" | "loading-roots" | "loading-branch" | "done" | "error";
+    requests: number;
+    loadedNodes: number;
+    lastParent: string;
+    error: string;
+  }>({
+    phase: "idle",
+    requests: 0,
+    loadedNodes: 0,
+    lastParent: "-",
+    error: "",
+  });
+
+  function mergeNodes(newNodes: CatalogNode[]) {
+    setNodes((prev) => {
+      const map = new Map<number, CatalogNode>();
+      prev.forEach((node) => map.set(node.id, node));
+      newNodes.forEach((node) => map.set(node.id, node));
+      return Array.from(map.values());
+    });
+  }
+
+  async function fetchNodePages(parentId?: number) {
+    const PAGE_SIZE = 500;
+    const MAX_PAGES = 50;
+    const aggregated: CatalogNode[] = [];
+    let offset = 0;
+    let pages = 0;
+    while (true) {
+      if (pages >= MAX_PAGES) {
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "error",
+          error: `Превышен лимит страниц при загрузке categories (parent=${parentId == null ? "root" : String(parentId)})`,
+        }));
+        break;
+      }
+      setNodeLoadState((prev) => ({
+        ...prev,
+        requests: prev.requests + 1,
+        lastParent: parentId == null ? "root" : String(parentId),
+      }));
+      const page = await fetchCatalogNodes(
+        {
+          parent_id: parentId,
+          limit: PAGE_SIZE,
+          offset,
+        },
+        baseUrl,
+        token,
+      );
+      aggregated.push(...page.results);
+      if (page.results.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+      pages += 1;
+    }
+    return aggregated;
+  }
 
   useEffect(() => {
     let active = true;
-    const loadNodes = async () => {
+    if (!catalogOpen) return () => { active = false; };
+    if (loadedParentIdsRef.current.has(null) && nodesReloadTick === 0) {
+      return () => {
+        active = false;
+      };
+    }
+
+    const loadRootNodes = async () => {
       try {
-        const data = await fetchCatalogNodes({ limit: 200 }, baseUrl, token);
-        if (active) setNodes(data.results);
+        setNodeLoadState((prev) => ({ ...prev, phase: "loading-roots", error: "" }));
+        const roots = await fetchNodePages(undefined);
+        if (!active) return;
+        const byId = new Map<number, CatalogNode>();
+        roots.forEach((node) => byId.set(node.id, node));
+        const queue = roots.filter((node) => node.has_children).map((node) => node.id);
+        const processedParents = new Set<number>();
+
+        while (queue.length) {
+          const parentId = queue.shift();
+          if (parentId == null || processedParents.has(parentId)) continue;
+          processedParents.add(parentId);
+
+          const children = await fetchNodePages(parentId);
+          if (!active) return;
+
+          children.forEach((node) => {
+            if (!byId.has(node.id)) {
+              byId.set(node.id, node);
+              if (node.has_children) queue.push(node.id);
+            }
+          });
+        }
+
+        const allNodes = Array.from(byId.values());
+        setNodes(allNodes);
+        loadedParentIdsRef.current = new Set([null, ...processedParents]);
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "done",
+          loadedNodes: allNodes.length,
+        }));
       } catch {
-        if (active) setNodes([]);
+        if (active) {
+          setNodes([]);
+          setNodeLoadState((prev) => ({
+            ...prev,
+            phase: "error",
+            error: "Не удалось загрузить корневые категории",
+          }));
+        }
       }
     };
-    void loadNodes();
+    void loadRootNodes();
     return () => {
       active = false;
     };
-  }, [baseUrl, token]);
+  }, [baseUrl, token, catalogOpen, nodesReloadTick]);
+
+  useEffect(() => {
+    if (!catalogOpen) return;
+    if (mode !== "tree") return;
+    if (nodeId == null) return;
+    const selectedNode = nodes.find((node) => node.id === nodeId);
+    if (!selectedNode?.has_children) return;
+    if (loadedParentIdsRef.current.has(nodeId)) return;
+
+    let active = true;
+    const loadChildren = async () => {
+      try {
+        setNodeLoadState((prev) => ({ ...prev, phase: "loading-branch", error: "" }));
+        const children = await fetchNodePages(nodeId);
+        if (!active) return;
+        mergeNodes(children);
+        loadedParentIdsRef.current.add(nodeId);
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "done",
+          loadedNodes: Math.max(prev.loadedNodes, nodes.length + children.length),
+        }));
+      } catch {
+        if (!active) return;
+        setNodeLoadState((prev) => ({
+          ...prev,
+          phase: "error",
+          error: `Не удалось загрузить дочерние категории для node_id=${nodeId}`,
+        }));
+      }
+    };
+    void loadChildren();
+    return () => {
+      active = false;
+    };
+  }, [catalogOpen, mode, nodeId, nodes, baseUrl, token]);
 
   useEffect(() => {
     let active = true;
     const loadItems = async () => {
+      if (mode === "tree" && nodeId == null) {
+        if (active) {
+          setItems([]);
+          setError("");
+          setLoading(false);
+        }
+        return;
+      }
+
       setLoading(true);
       setError("");
       try {
@@ -310,10 +485,63 @@ function LotPicker({
   }, [selectedLots, baseUrl, token]);
 
   const selectedIds = useMemo(() => new Set(selectedLots.map((lot) => lot.id)), [selectedLots]);
-  const selectableNodes = useMemo(
-    () => nodes.filter((node) => !node.has_children || node.items_count > 0),
-    [nodes],
-  );
+  const nodeById = useMemo(() => {
+    const map = new Map<number, CatalogNode>();
+    nodes.forEach((node) => map.set(node.id, node));
+    return map;
+  }, [nodes]);
+  function nodePathLabel(node: CatalogNode) {
+    const parts: string[] = [];
+    const seen = new Set<number>();
+    let cursor: CatalogNode | undefined = node;
+    while (cursor && !seen.has(cursor.id)) {
+      seen.add(cursor.id);
+      parts.push(cursor.name);
+      cursor = cursor.parent_id != null ? nodeById.get(cursor.parent_id) : undefined;
+    }
+    return parts.reverse().join(" / ");
+  }
+  const categoryOptions = useMemo(() => {
+    return [...nodes]
+      .filter((node) => (node.items_count ?? 0) > 0)
+      .sort((a, b) => nodePathLabel(a).localeCompare(nodePathLabel(b), "ru"));
+  }, [nodes, nodeById]);
+
+  function resolvedNodeName(item?: CatalogItem) {
+    const fromItem = item?.node_name?.trim();
+    if (fromItem) return fromItem;
+    const fromMap = item ? nodeById.get(item.node_id)?.name?.trim() : "";
+    return fromMap || "";
+  }
+
+  function resolvedParentNodeName(item?: CatalogItem) {
+    const fromItem = item?.parent_node_name?.trim();
+    if (fromItem) return fromItem;
+    if (!item) return "";
+    const node = nodeById.get(item.node_id);
+    if (!node?.parent_id) return "";
+    return nodeById.get(node.parent_id)?.name?.trim() || "";
+  }
+
+  function itemHierarchyText(item?: CatalogItem) {
+    if (!item) return "";
+    const nodeName = resolvedNodeName(item);
+    const parentName = resolvedParentNodeName(item);
+    if (nodeName) return parentName ? `${parentName} -> ${nodeName}` : nodeName;
+    return "";
+  }
+
+  function itemDisplayName(item?: CatalogItem) {
+    if (!item) return "";
+    const nodeName = resolvedNodeName(item);
+    if (!nodeName) return item.name;
+    const normalizedItemName = (item.name ?? "").trim().toLowerCase();
+    const normalizedNodeName = nodeName.toLowerCase();
+    if (!normalizedItemName || normalizedItemName.includes(normalizedNodeName)) {
+      return item.name;
+    }
+    return `${nodeName} - ${item.name}`;
+  }
 
   function addLot(item: CatalogItem) {
     if (selectedIds.has(item.id)) return;
@@ -377,9 +605,9 @@ function LotPicker({
                   onChange={(e) => setNodeId(e.target.value ? Number(e.target.value) : undefined)}
                   disabled={disabled}
                 >
-                  <option value="">Все конечные категории</option>
-                  {selectableNodes.map((node) => (
-                    <option key={node.id} value={node.id}>{node.name}</option>
+                  <option value="">Выберите категорию</option>
+                  {categoryOptions.map((node) => (
+                    <option key={node.id} value={node.id}>{nodePathLabel(node)}</option>
                   ))}
                 </select>
               </label>
@@ -397,8 +625,9 @@ function LotPicker({
                 {items.map((item) => (
                   <div key={item.id} className="mk-catalog-row">
                     <div>
-                      <strong>{item.name}</strong>
+                      <strong>{itemDisplayName(item)}</strong>
                       <span>{item.code} · {item.unit}</span>
+                      {itemHierarchyText(item) ? <span>{itemHierarchyText(item)}</span> : null}
                     </div>
                     <button type="button" className="mk-ghost" onClick={() => addLot(item)} disabled={disabled || selectedIds.has(item.id)}>
                       {selectedIds.has(item.id) ? "Добавлен" : "Добавить"}
@@ -420,8 +649,9 @@ function LotPicker({
             return (
               <div key={lot.id} className="mk-selected-lot-row">
                 <div>
-                  <strong>{item?.name ?? `Позиция #${lot.id}`}</strong>
+                  <strong>{item ? itemDisplayName(item) : `Позиция #${lot.id}`}</strong>
                   <span>{item?.code ?? "Код отсутствует"}</span>
+                  {itemHierarchyText(item) ? <span>{itemHierarchyText(item)}</span> : null}
                 </div>
                 <div className="mk-selected-lot-controls">
                   <input
@@ -466,6 +696,13 @@ export function App() {
   const [winner, setWinner] = useState<Bid | null>(null);
   const [winnerMsg, setWinnerMsg] = useState("");
   const [loadingWinner, setLoadingWinner] = useState(false);
+  const [confirmation, setConfirmation] = useState<ConfirmationStatus | null>(null);
+  const [confirmationMsg, setConfirmationMsg] = useState("");
+  const [loadingConfirmation, setLoadingConfirmation] = useState(false);
+  const [certificates, setCertificates] = useState<CryptoCertificateInfo[]>([]);
+  const [loadingCertificates, setLoadingCertificates] = useState(false);
+  const [selectedCertThumbprint, setSelectedCertThumbprint] = useState("");
+  const [signingNow, setSigningNow] = useState(false);
   const [bidForm, setBidForm] = useState({ bid_amount: "", comment: "" });
   const [bidLoading, setBidLoading] = useState(false);
   const [draftEditForm, setDraftEditForm] = useState<DraftEditForm>(DEFAULT_DRAFT_EDIT_FORM);
@@ -598,6 +835,23 @@ export function App() {
     catch (e) { setWinner(null); setWinnerMsg(toRussianErrorMessage(e)); }
     finally { setLoadingWinner(false); }
   }
+  async function loadConfirmation(id: number) {
+    if (!tokens?.access) {
+      setConfirmation(null);
+      setConfirmationMsg("Войдите, чтобы увидеть статус подписания.");
+      return;
+    }
+    setLoadingConfirmation(true);
+    setConfirmationMsg("");
+    try {
+      setConfirmation(await fetchAuctionConfirmationStatus(id, tokens.access, apiBase));
+    } catch (e) {
+      setConfirmation(null);
+      setConfirmationMsg(toRussianErrorMessage(e));
+    } finally {
+      setLoadingConfirmation(false);
+    }
+  }
 
   useEffect(() => {
     void syncServerTime();
@@ -651,6 +905,15 @@ export function App() {
   }, [auction?.id, auction?.title, auction?.description, auction?.start_price, auction?.start_date, auction?.end_date, auction?.specific?.min_bid_decrement]);
   useEffect(() => { if (!selectedId) return; startTransition(() => { void loadAuction(selectedId); }); }, [selectedId, apiBase]);
   useEffect(() => { if (route.name === "auction" && detailTab === "bids" && selectedId) void loadBids(selectedId); }, [route, detailTab, selectedId, apiBase, tokens?.access]);
+  useEffect(() => {
+    if (route.name !== "auction" || !selectedId || !auction) return;
+    if (auction.status !== "FINISHED" && auction.status !== "CLOSED") {
+      setConfirmation(null);
+      setConfirmationMsg("");
+      return;
+    }
+    void loadConfirmation(selectedId);
+  }, [route, selectedId, auction?.id, auction?.status, apiBase, tokens?.access]);
   useEffect(() => {
     const inn = normalizeInnInput(registerForm.inn ?? "");
     if (!inn) {
@@ -891,10 +1154,64 @@ export function App() {
     }
   }
 
+  async function onLoadCertificates() {
+    setLoadingCertificates(true);
+    try {
+      const certs = await listCryptoProCertificates();
+      setCertificates(certs);
+      if (!selectedCertThumbprint && certs[0]?.thumbprint) {
+        setSelectedCertThumbprint(certs[0].thumbprint);
+      }
+      if (!certs.length) {
+        setToast({ kind: "error", text: "Не найдено доступных сертификатов с закрытым ключом." });
+      }
+    } catch (err) {
+      setToast({ kind: "error", text: `Ошибка загрузки сертификатов: ${toRussianErrorMessage(err)}` });
+    } finally {
+      setLoadingCertificates(false);
+    }
+  }
+
+  async function onSignConfirmation(role: "creator" | "winner") {
+    if (!auction || !tokens?.access) {
+      setToast({ kind: "error", text: "Сначала войдите в аккаунт." });
+      return;
+    }
+    if (!selectedCertThumbprint) {
+      setToast({ kind: "error", text: "Выберите сертификат для подписи." });
+      return;
+    }
+    const documentText = buildConfirmationDocumentText(auction, role);
+    setSigningNow(true);
+    try {
+      const signature = await signWithCryptoPro(documentText, selectedCertThumbprint);
+      const payload = {
+        document_text: documentText,
+        signature,
+        cert_thumbprint: selectedCertThumbprint,
+        signature_type: "CAdES-BES-attached",
+      };
+      if (role === "creator") {
+        await confirmAuctionCreator(auction.id, tokens.access, payload, apiBase);
+      } else {
+        await confirmAuctionWinner(auction.id, tokens.access, payload, apiBase);
+      }
+      await loadConfirmation(auction.id);
+      setToast({ kind: "ok", text: role === "creator" ? "Подтверждение заказчика отправлено." : "Подтверждение победителя отправлено." });
+    } catch (err) {
+      setToast({ kind: "error", text: `Ошибка подписи: ${toRussianErrorMessage(err)}` });
+    } finally {
+      setSigningNow(false);
+    }
+  }
+
   const navActive = (name: Route["name"]) => route.name === name || (name === "browse" && route.name === "auction");
   const isAuctionOwner = !!auction && typeof userId === "number" && Number(auction.owner) === Number(userId);
   const isOwnerDraft = !!auction && isAuctionOwner && auction.status === "DRAFT";
   const canOwnerCloseAuction = !!auction && isAuctionOwner && !["CLOSED", "FINISHED", "CANCELED"].includes(auction.status);
+  const canSignResult = !!auction && ["FINISHED", "CLOSED"].includes(auction.status);
+  const canSignAsCreator = canSignResult && isAuctionOwner;
+  const canSignAsWinner = canSignResult && !isAuctionOwner;
   const viewerRole = currentUser?.profile?.role;
   const canBidByRole = viewerRole === "supplier" || viewerRole === "admin";
 
@@ -939,7 +1256,7 @@ export function App() {
 
       {route.name === "browse" ? <div className="mk-page-grid"><aside className="mk-page-sidebar"><Card title="Фильтры" subtitle="Параметры отображения списка аукционов."><div className="mk-filter-block"><div className="mk-tabs"><button type="button" className={catalogMode === "all" ? "mk-tab active" : "mk-tab"} onClick={() => setCatalogMode("all")}>Все</button><button type="button" className={catalogMode === "active" ? "mk-tab active" : "mk-tab"} onClick={() => setCatalogMode("active")}>Идут сейчас</button></div><label className="mk-field-label">Поиск<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Название аукциона, статус, ID" /></label><div className="mk-note">{filtered.length} объявлений</div></div></Card></aside><section className="mk-page-content"><Card title="Список аукционов" subtitle="Просмотр всех аукционов в формате витрины." action={loadingAuctions ? <small className="mk-inline-muted">Обновление...</small> : undefined}>{loadingAuctions && !filtered.length ? <div className="mk-empty">Загрузка аукционов...</div> : null}{!loadingAuctions && !filtered.length ? <div className="mk-empty">По вашему запросу ничего не найдено.</div> : null}{!!filtered.length ? <div className="mk-grid mk-grid-market">{filtered.map((a) => <Tile key={a.id} a={a} nowMs={serverNowMs} open={() => openAuction(a.id)} />)}</div> : null}</Card></section></div> : null}
 
-      {route.name === "auction" ? <div className="mk-detail-layout"><section className="mk-detail-main"><Card title={auction?.title || "Аукцион"} subtitle={auction ? `Активный аукцион` : "Выберите аукцион из списка."} action={auction ? <Status s={auction.status} /> : undefined}>{loadingAuction ? <div className="mk-empty">Загрузка аукциона...</div> : null}{!loadingAuction && !auction ? <div className="mk-empty">Аукцион не найден.</div> : null}{auction ? <div className="mk-detail"><div className="mk-product-hero"><div className="mk-product-gallery" aria-hidden="true"><div className="mk-product-gallery-main">{(auction.title || "А")[0].toUpperCase()}</div><div className="mk-product-gallery-row"><span /><span /><span /></div></div><div className="mk-product-summary"><p className="mk-product-copy">{auction.description || "Описание отсутствует."}</p><div className="mk-detail-stats"><div><small>Текущая цена</small><strong>{money(auction.current_price ?? auction.start_price)}</strong></div><div><small>Начальная цена</small><strong>{money(auction.start_price)}</strong></div><div><small>До окончания</small><strong>{timeLeft(auction.end_date, serverNowMs)}</strong></div><div><small>Мин. шаг снижения</small><strong>{auction.specific?.min_bid_decrement ?? "-"}</strong></div></div><div className="mk-meta-list"><span>Начало: {dateText(auction.start_date)}</span><span>Окончание: {dateText(auction.end_date)}</span><span>Продавец</span></div></div></div><div className="mk-tabs compact mk-segmented"><button type="button" className={detailTab === "overview" ? "mk-tab active" : "mk-tab"} onClick={() => setDetailTab("overview")}>Обзор</button><button type="button" className={detailTab === "bids" ? "mk-tab active" : "mk-tab"} onClick={() => { setDetailTab("bids"); void loadBids(auction.id); }}>Ставки</button></div>{detailTab === "overview" ? <div className="mk-lots"><div className="mk-subhead"><span>Лоты</span><small>{auction.lots?.length ?? 0}</small></div>{(auction.lots ?? []).map((lot) => <div key={`${lot.id}-${lot.code}`} className="mk-lot-row"><div><strong>{lot.name}</strong><span>{lot.code || "Позиция"}</span></div><div><strong>{lot.quantity}</strong><span>{lot.unit}</span></div></div>)}{!auction.lots?.length ? <div className="mk-empty small">Лоты пока не добавлены.</div> : null}</div> : <div className="mk-bids">{bidsMsg ? <div className="mk-warning">{bidsMsg}</div> : null}{loadingBids ? <div className="mk-empty small">Загрузка ставок...</div> : null}{!loadingBids && bids.map((b) => <div key={b.id} className="mk-bid-row"><div><strong>{money(b.bid)}</strong><span>Поставщик</span></div><p>{b.comment || "Без комментария"}</p></div>)}{!loadingBids && !bids.length && !bidsMsg ? <div className="mk-empty small">Ставок пока нет.</div> : null}</div>}</div> : null}</Card></section><aside className="mk-detail-side"><Card title={isOwnerDraft ? "Редактирование черновика" : "Сделать ставку"} subtitle={isOwnerDraft ? "Редактировать можно только черновики. Когда все готово, опубликуйте аукцион." : "Отправьте новую ставку для этого аукциона."}>{!auction ? <div className="mk-empty small">Сначала выберите аукцион.</div> : isOwnerDraft ? <div className="mk-form"><div className="mk-form-grid"><label className="mk-field-label">Название<input value={draftEditForm.title} onChange={(e) => setDraftEditForm((f) => ({ ...f, title: e.target.value }))} /></label><label className="mk-field-label">Начальная цена<input type="number" step="0.01" value={draftEditForm.start_price} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_price: e.target.value }))} /></label><label className="mk-field-label">Время начала<input type="datetime-local" value={draftEditForm.start_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_date_local: e.target.value }))} /></label><label className="mk-field-label">Время окончания<input type="datetime-local" value={draftEditForm.end_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, end_date_local: e.target.value }))} /></label><label className="mk-field-label">Мин. шаг снижения<input type="number" step="0.01" value={draftEditForm.min_bid_decrement} onChange={(e) => setDraftEditForm((f) => ({ ...f, min_bid_decrement: e.target.value }))} /></label></div><label className="mk-field-label">Описание<textarea rows={4} value={draftEditForm.description} onChange={(e) => setDraftEditForm((f) => ({ ...f, description: e.target.value }))} /></label><LotPicker selectedLots={draftLots} onChange={setDraftLots} baseUrl={apiBase} token={tokens?.access ?? undefined} disabled={draftEditLoading} />{draftLotErrors.length ? <div className="mk-warning">{draftLotErrors.join("; ")}</div> : null}<div className="mk-inline-actions"><button type="button" disabled={draftEditLoading} onClick={onSaveDraft}>{draftEditLoading ? "Сохранение..." : "Сохранить черновик"}</button><button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={onPublish}>{draftEditLoading ? "Подождите..." : "Опубликовать"}</button>{canOwnerCloseAuction ? <button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={() => void onCloseAuction()}>{draftEditLoading ? "Подождите..." : "Закрыть аукцион"}</button> : null}</div></div> : isAuctionOwner ? <div className="mk-empty small">Этот аукцион уже опубликован. Владелец не может редактировать его или делать ставки.</div> : !tokens?.access ? <div className="mk-empty small">Войдите как поставщик, чтобы делать ставки.</div> : !canBidByRole ? <div className="mk-empty small">Ставки в этом аукционе могут делать только поставщики.</div> : auction.status !== "ACTIVE" ? <div className="mk-empty small">Прием ставок начнется, когда аукцион станет активным.</div> : <form className="mk-form" onSubmit={onBid}><label className="mk-field-label">Цена ставки (чем ниже, тем лучше)<input type="number" step="0.01" min="0" value={bidForm.bid_amount} onChange={(e) => setBidForm((f) => ({ ...f, bid_amount: e.target.value }))} placeholder="Введите более низкую цену" /></label><label className="mk-field-label">Комментарий (необязательно)<input value={bidForm.comment} onChange={(e) => setBidForm((f) => ({ ...f, comment: e.target.value }))} placeholder="Срок поставки, примечания" /></label><div className="mk-inline-actions"><button type="submit" disabled={bidLoading}>{bidLoading ? "Отправка..." : "Отправить ставку"}</button><button type="button" className="mk-ghost" onClick={() => void loadBids(auction.id)}>Обновить ставки</button><button type="button" className="mk-ghost" onClick={() => void loadWinner(auction.id)}>Проверить победителя</button></div>{(loadingWinner || winner || winnerMsg) ? <div className="mk-winner-box">{loadingWinner ? <span>Проверка победителя...</span> : null}{winner ? <span>Текущий победитель: {money(winner.bid)}</span> : null}{!winner && winnerMsg ? <span>{winnerMsg}</span> : null}</div> : null}</form>}</Card>{isAuctionOwner && !isOwnerDraft && canOwnerCloseAuction ? <Card title="Действия владельца" subtitle="Управление статусом аукциона."><div className="mk-inline-actions"><button type="button" className="mk-ghost" onClick={() => void onCloseAuction()}>Закрыть аукцион</button></div></Card> : null}<Card title="Другие аукционы" subtitle="Откройте другой активный или недавний аукцион."><div className="mk-list-rows">{(activeAuctions.length ? activeAuctions : allAuctions).slice(0, 6).map((a) => <button key={a.id} type="button" className="mk-row-link" onClick={() => openAuction(a.id)}><div><strong>{a.title}</strong><span>{statusText(a.status)}</span></div><div><strong>{money(a.current_price ?? a.start_price)}</strong><span>{timeLeft(a.end_date, serverNowMs)}</span></div></button>)}{!(activeAuctions.length || allAuctions.length) ? <div className="mk-empty small">Нет доступных аукционов.</div> : null}</div></Card></aside></div> : null}
+      {route.name === "auction" ? <div className="mk-detail-layout"><section className="mk-detail-main"><Card title={auction?.title || "Аукцион"} subtitle={auction ? `Активный аукцион` : "Выберите аукцион из списка."} action={auction ? <Status s={auction.status} /> : undefined}>{loadingAuction ? <div className="mk-empty">Загрузка аукциона...</div> : null}{!loadingAuction && !auction ? <div className="mk-empty">Аукцион не найден.</div> : null}{auction ? <div className="mk-detail"><div className="mk-product-hero"><div className="mk-product-gallery" aria-hidden="true"><div className="mk-product-gallery-main">{(auction.title || "А")[0].toUpperCase()}</div><div className="mk-product-gallery-row"><span /><span /><span /></div></div><div className="mk-product-summary"><p className="mk-product-copy">{auction.description || "Описание отсутствует."}</p><div className="mk-detail-stats"><div><small>Текущая цена</small><strong>{money(auction.current_price ?? auction.start_price)}</strong></div><div><small>Начальная цена</small><strong>{money(auction.start_price)}</strong></div><div><small>До окончания</small><strong>{timeLeft(auction.end_date, serverNowMs)}</strong></div><div><small>Мин. шаг снижения</small><strong>{auction.specific?.min_bid_decrement ?? "-"}</strong></div></div><div className="mk-meta-list"><span>Начало: {dateText(auction.start_date)}</span><span>Окончание: {dateText(auction.end_date)}</span><span>Продавец</span></div></div></div><div className="mk-tabs compact mk-segmented"><button type="button" className={detailTab === "overview" ? "mk-tab active" : "mk-tab"} onClick={() => setDetailTab("overview")}>Обзор</button><button type="button" className={detailTab === "bids" ? "mk-tab active" : "mk-tab"} onClick={() => { setDetailTab("bids"); void loadBids(auction.id); }}>Ставки</button></div>{detailTab === "overview" ? <div className="mk-lots"><div className="mk-subhead"><span>Лоты</span><small>{auction.lots?.length ?? 0}</small></div>{(auction.lots ?? []).map((lot) => <div key={`${lot.id}-${lot.code}`} className="mk-lot-row"><div><strong>{lot.name}</strong><span>{lot.code || "Позиция"}</span></div><div><strong>{lot.quantity}</strong><span>{lot.unit}</span></div></div>)}{!auction.lots?.length ? <div className="mk-empty small">Лоты пока не добавлены.</div> : null}</div> : <div className="mk-bids">{bidsMsg ? <div className="mk-warning">{bidsMsg}</div> : null}{loadingBids ? <div className="mk-empty small">Загрузка ставок...</div> : null}{!loadingBids && bids.map((b) => <div key={b.id} className="mk-bid-row"><div><strong>{money(b.bid)}</strong><span>Поставщик</span></div><p>{b.comment || "Без комментария"}</p></div>)}{!loadingBids && !bids.length && !bidsMsg ? <div className="mk-empty small">Ставок пока нет.</div> : null}</div>}</div> : null}</Card></section><aside className="mk-detail-side"><Card title={isOwnerDraft ? "Редактирование черновика" : "Сделать ставку"} subtitle={isOwnerDraft ? "Редактировать можно только черновики. Когда все готово, опубликуйте аукцион." : "Отправьте новую ставку для этого аукциона."}>{!auction ? <div className="mk-empty small">Сначала выберите аукцион.</div> : isOwnerDraft ? <div className="mk-form"><div className="mk-form-grid"><label className="mk-field-label">Название<input value={draftEditForm.title} onChange={(e) => setDraftEditForm((f) => ({ ...f, title: e.target.value }))} /></label><label className="mk-field-label">Начальная цена<input type="number" step="0.01" value={draftEditForm.start_price} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_price: e.target.value }))} /></label><label className="mk-field-label">Время начала<input type="datetime-local" value={draftEditForm.start_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, start_date_local: e.target.value }))} /></label><label className="mk-field-label">Время окончания<input type="datetime-local" value={draftEditForm.end_date_local} onChange={(e) => setDraftEditForm((f) => ({ ...f, end_date_local: e.target.value }))} /></label><label className="mk-field-label">Мин. шаг снижения<input type="number" step="0.01" value={draftEditForm.min_bid_decrement} onChange={(e) => setDraftEditForm((f) => ({ ...f, min_bid_decrement: e.target.value }))} /></label></div><label className="mk-field-label">Описание<textarea rows={4} value={draftEditForm.description} onChange={(e) => setDraftEditForm((f) => ({ ...f, description: e.target.value }))} /></label><LotPicker selectedLots={draftLots} onChange={setDraftLots} baseUrl={apiBase} token={tokens?.access ?? undefined} disabled={draftEditLoading} />{draftLotErrors.length ? <div className="mk-warning">{draftLotErrors.join("; ")}</div> : null}<div className="mk-inline-actions"><button type="button" disabled={draftEditLoading} onClick={onSaveDraft}>{draftEditLoading ? "Сохранение..." : "Сохранить черновик"}</button><button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={onPublish}>{draftEditLoading ? "Подождите..." : "Опубликовать"}</button>{canOwnerCloseAuction ? <button type="button" className="mk-ghost" disabled={draftEditLoading} onClick={() => void onCloseAuction()}>{draftEditLoading ? "Подождите..." : "Закрыть аукцион"}</button> : null}</div></div> : isAuctionOwner ? <div className="mk-empty small">Этот аукцион уже опубликован. Владелец не может редактировать его или делать ставки.</div> : !tokens?.access ? <div className="mk-empty small">Войдите как поставщик, чтобы делать ставки.</div> : !canBidByRole ? <div className="mk-empty small">Ставки в этом аукционе могут делать только поставщики.</div> : auction.status !== "ACTIVE" ? <div className="mk-empty small">Прием ставок начнется, когда аукцион станет активным.</div> : <form className="mk-form" onSubmit={onBid}><label className="mk-field-label">Цена ставки (чем ниже, тем лучше)<input type="number" step="0.01" min="0" value={bidForm.bid_amount} onChange={(e) => setBidForm((f) => ({ ...f, bid_amount: e.target.value }))} placeholder="Введите более низкую цену" /></label><label className="mk-field-label">Комментарий (необязательно)<input value={bidForm.comment} onChange={(e) => setBidForm((f) => ({ ...f, comment: e.target.value }))} placeholder="Срок поставки, примечания" /></label><div className="mk-inline-actions"><button type="submit" disabled={bidLoading}>{bidLoading ? "Отправка..." : "Отправить ставку"}</button><button type="button" className="mk-ghost" onClick={() => void loadBids(auction.id)}>Обновить ставки</button><button type="button" className="mk-ghost" onClick={() => void loadWinner(auction.id)}>Проверить победителя</button></div>{(loadingWinner || winner || winnerMsg) ? <div className="mk-winner-box">{loadingWinner ? <span>Проверка победителя...</span> : null}{winner ? <span>Текущий победитель: {money(winner.bid)}</span> : null}{!winner && winnerMsg ? <span>{winnerMsg}</span> : null}</div> : null}</form>}</Card>{canSignResult ? <Card title="Подписание результата ЭЦП" subtitle="Сформируйте текст подтверждения, подпишите его через КриптоПро и отправьте на сервер."><div className="mk-form"><div className="mk-inline-actions"><button type="button" className="mk-ghost" onClick={() => void loadConfirmation(auction!.id)} disabled={loadingConfirmation}>{loadingConfirmation ? "Обновление..." : "Обновить статус"}</button><button type="button" className="mk-ghost" onClick={() => void onLoadCertificates()} disabled={loadingCertificates}>{loadingCertificates ? "Загрузка..." : "Загрузить сертификаты"}</button></div>{confirmation ? <div className="mk-note">Статус: {confirmation.status ?? "-"}. Заказчик: {confirmation.creator_signed_at ? "подписал" : "не подписал"}, победитель: {confirmation.winner_signed_at ? "подписал" : "не подписал"}. Дедлайн: {dateText(confirmation.signing_deadline)}.</div> : null}{confirmationMsg ? <div className="mk-warning">{confirmationMsg}</div> : null}<label className="mk-field-label">Сертификат<select value={selectedCertThumbprint} onChange={(e) => setSelectedCertThumbprint(e.target.value)}><option value="">Выберите сертификат</option>{certificates.map((cert) => <option key={cert.thumbprint} value={cert.thumbprint}>{cert.subjectName} · до {dateText(cert.validTo)}</option>)}</select></label>{canSignAsCreator || canSignAsWinner ? <div className="mk-inline-actions">{canSignAsCreator ? <button type="button" onClick={() => void onSignConfirmation("creator")} disabled={signingNow || !selectedCertThumbprint}>{signingNow ? "Подписание..." : "Подписать как заказчик"}</button> : null}{canSignAsWinner ? <button type="button" onClick={() => void onSignConfirmation("winner")} disabled={signingNow || !selectedCertThumbprint}>{signingNow ? "Подписание..." : "Подписать как победитель"}</button> : null}</div> : <div className="mk-note">Подписывать результат могут только заказчик или победитель аукциона.</div>}</div></Card> : null}{isAuctionOwner && !isOwnerDraft && canOwnerCloseAuction ? <Card title="Действия владельца" subtitle="Управление статусом аукциона."><div className="mk-inline-actions"><button type="button" className="mk-ghost" onClick={() => void onCloseAuction()}>Закрыть аукцион</button></div></Card> : null}<Card title="Другие аукционы" subtitle="Откройте другой активный или недавний аукцион."><div className="mk-list-rows">{(activeAuctions.length ? activeAuctions : allAuctions).slice(0, 6).map((a) => <button key={a.id} type="button" className="mk-row-link" onClick={() => openAuction(a.id)}><div><strong>{a.title}</strong><span>{statusText(a.status)}</span></div><div><strong>{money(a.current_price ?? a.start_price)}</strong><span>{timeLeft(a.end_date, serverNowMs)}</span></div></button>)}{!(activeAuctions.length || allAuctions.length) ? <div className="mk-empty small">Нет доступных аукционов.</div> : null}</div></Card></aside></div> : null}
 
       {route.name === "sell" ? (
         <div className="mk-create-page-full">
@@ -1000,7 +1317,7 @@ export function App() {
                     <label className="mk-field-label">Пароль<input type="password" value={registerForm.password} onChange={(e) => setRegisterForm((f) => ({ ...f, password: e.target.value }))} /></label>
                     <label className="mk-field-label">Роль<select value={registerForm.role} onChange={(e) => setRegisterForm((f) => ({ ...f, role: e.target.value as UserRole }))}><option value="supplier">Поставщик</option><option value="buyer">Покупатель</option></select></label>
                     <label className="mk-field-label">Компания<input value={registerForm.company_name ?? ""} onChange={(e) => setRegisterForm((f) => ({ ...f, company_name: e.target.value }))} /></label>
-                    <label className="mk-field-label">ИНН<input value={registerForm.inn ?? ""} inputMode="numeric" pattern="^(?:\\d{10}|\\d{12})$" onChange={(e) => setRegisterForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} /></label>
+                    <label className="mk-field-label">ИНН<input value={registerForm.inn ?? ""} inputMode="numeric" pattern={INN_INPUT_PATTERN} onChange={(e) => setRegisterForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} /></label>
                   </div>
                   {registerInnLoading ? <div className="mk-note">Проверяем ИНН в DaData...</div> : null}
                   {registerInnResolved ? <div className="mk-note">Организация найдена: {registerInnResolved}</div> : null}
@@ -1057,7 +1374,7 @@ export function App() {
                       <input value={accountForm.company_name} onChange={(e) => setAccountForm((f) => ({ ...f, company_name: e.target.value }))} />
                     </label>
                     <label className="mk-field-label">ИНН
-                      <input value={accountForm.inn} inputMode="numeric" pattern="^(?:\\d{10}|\\d{12})$" onChange={(e) => setAccountForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} />
+                      <input value={accountForm.inn} inputMode="numeric" pattern={INN_INPUT_PATTERN} onChange={(e) => setAccountForm((f) => ({ ...f, inn: normalizeInnInput(e.target.value) }))} />
                     </label>
                     <label className="mk-field-label">Новый пароль (необязательно)
                       <input type="password" value={accountForm.password} onChange={(e) => setAccountForm((f) => ({ ...f, password: e.target.value }))} placeholder="Оставьте пустым, если не хотите менять пароль" />

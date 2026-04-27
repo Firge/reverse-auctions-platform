@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
@@ -154,10 +155,12 @@ class AuctionViewSet(viewsets.ModelViewSet):
             return Response({"error": "Опубликовать можно только черновик аукциона."}, status=status.HTTP_400_BAD_REQUEST)
 
         base_url = request.build_absolute_uri('/')
-        return_url = base_url + f'auction/{auction.id}/'
+        return_url = base_url + f'auction/{auction.id}'
+        payment_amount = Decimal(auction.start_price) * Decimal(os.getenv("PAYMENT_AUCTION_FORFEIT_PERCENT", 5)) / Decimal(100)
         payment_data = freeze_funds(
             request.user.id,
             auction.id,
+            amount=payment_amount,
             description=f"Заморозка для публикации аукциона #{auction.id}",
             return_url=return_url
         )
@@ -209,10 +212,12 @@ class AuctionViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         try:
             base_url = request.build_absolute_uri('/')
-            return_url = base_url + f'auction/{auction.id}/'
+            return_url = base_url + f'auction/{auction.id}'
+            payment_amount = Decimal(auction.start_price) * Decimal(os.getenv("PAYMENT_BID_FORFEIT_PERCENT", 5)) / Decimal(100)
             payment_data = freeze_funds(
                 request.user.id,
                 auction.id,
+                amount=payment_amount,
                 description=f"Заморозка для участия в аукционе #{auction.id}",
                 return_url=return_url
             )
@@ -367,7 +372,7 @@ class CatalogItemListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        queryset = CatalogItem.objects.all()
+        queryset = CatalogItem.objects.select_related("node", "node__parent").all()
 
         q = self.request.query_params.get('q')
         if q:
@@ -397,7 +402,7 @@ class CatalogItemByIdsView(APIView):
         except ValueError:
             return Response({"error": "Некорректный формат ids."}, status=400)
 
-        items = CatalogItem.objects.filter(id__in=ids)
+        items = CatalogItem.objects.select_related('node', 'node__parent').filter(id__in=ids)
         serializer = CatalogItemSerializer(items, many=True)
         return Response(serializer.data)
 
