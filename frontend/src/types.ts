@@ -65,6 +65,8 @@ export type CatalogItem = {
   parent_node_name?: string | null;
   source_id: number | null;
   default_quantity?: string | null;
+  price_release?: number | null;
+  price_estimate?: number | null;
 };
 
 export type CatalogNodesResponse = {
