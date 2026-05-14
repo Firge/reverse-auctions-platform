@@ -840,6 +840,7 @@ export function App() {
   const [createLoading, setCreateLoading] = useState(false);
   const [showPriceCalc, setShowPriceCalc] = useState(false);
   const [priceCalcMsg, setPriceCalcMsg] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [currentUserLoading, setCurrentUserLoading] = useState(false);
   const [ownedAuctions, setOwnedAuctions] = useState<Auction[]>([]);
@@ -874,10 +875,21 @@ export function App() {
   function go(next: Route) {
     window.history.pushState(null, "", routePath(next));
     setRoute(next);
+    setNavOpen(false);
   }
   function openAuction(id: number) {
     setSelectedId(id);
     go({ name: "auction", id });
+  }
+
+  function clearAuthState(message?: string) {
+    setStoredTokens(null);
+    setTokens(null);
+    tokensRef.current = null;
+    setCurrentUser(null);
+    setOwnedAuctions([]);
+    setParticipatingAuctions([]);
+    if (message) setToast({ kind: "error", text: message });
   }
 
   async function tryRefreshToken(): Promise<TokenPair | null> {
@@ -890,12 +902,7 @@ export function App() {
       tokensRef.current = newPair;
       return newPair;
     } catch {
-      setStoredTokens(null);
-      setTokens(null);
-      tokensRef.current = null;
-      setCurrentUser(null);
-      setOwnedAuctions([]);
-      setParticipatingAuctions([]);
+      clearAuthState("Сессия истекла. Войдите снова.");
       return null;
     }
   }
@@ -905,6 +912,21 @@ export function App() {
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, []);
+  useEffect(() => {
+    if (!tokens?.access) return;
+    const claims = parseClaims(tokens.access);
+    if (!claims?.exp) return;
+    const expMs = claims.exp * 1000;
+    const now = Date.now();
+    if (expMs <= now) {
+      clearAuthState("Сессия истекла. Войдите снова.");
+      return;
+    }
+    const t = window.setTimeout(() => {
+      clearAuthState("Сессия истекла. Войдите снова.");
+    }, expMs - now);
+    return () => window.clearTimeout(t);
+  }, [tokens?.access]);
   useEffect(() => {
     if (route.name === "auction") setSelectedId(route.id);
     if (route.name === "login") setAuthMode("login");
@@ -1577,7 +1599,15 @@ export function App() {
             Поиск
           </button>
         </div>
-        <nav className="mk-nav">
+        <button
+          type="button"
+          className="mk-nav-toggle"
+          aria-expanded={navOpen}
+          onClick={() => setNavOpen((value) => !value)}
+        >
+          {navOpen ? "Скрыть меню" : "Меню"}
+        </button>
+        <nav className={`mk-nav${navOpen ? " open" : ""}`}>
           <button
             type="button"
             className={navActive("home") ? "mk-pill active" : "mk-pill"}
@@ -1700,6 +1730,34 @@ export function App() {
                 </button>
               ))}
               {!endingSoon.length ? <div className="mk-empty small">Активных аукционов пока нет.</div> : null}
+            </div>
+          </Card>
+          <Card
+            title="Сервисы платформы"
+            subtitle="Заглушки будущих модулей: доставка, склады и аренда спецтехники."
+          >
+            <div className="mk-service-grid">
+              <div className="mk-service-tile">
+                <div className="mk-service-icon">D</div>
+                <div>
+                  <strong>Доставка</strong>
+                  <span>Расчет маршрутов, слоты и статусы отгрузок. Скоро.</span>
+                </div>
+              </div>
+              <div className="mk-service-tile">
+                <div className="mk-service-icon">W</div>
+                <div>
+                  <strong>Склады</strong>
+                  <span>Остатки, бронирования и перемещения между складами. Скоро.</span>
+                </div>
+              </div>
+              <div className="mk-service-tile">
+                <div className="mk-service-icon">R</div>
+                <div>
+                  <strong>Аренда спецтехники</strong>
+                  <span>Каталог техники, доступность и заявки на аренду. Скоро.</span>
+                </div>
+              </div>
             </div>
           </Card>
         </>
