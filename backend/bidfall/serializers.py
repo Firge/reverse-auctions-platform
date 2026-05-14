@@ -178,6 +178,8 @@ class CatalogItemSerializer(serializers.ModelSerializer):
             'code',
             'name',
             'unit',
+            'price_release',
+            'price_estimate',
             'node_id',
             'node_name',
             'parent_node_id',
