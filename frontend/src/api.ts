@@ -44,6 +44,8 @@ const MOCK_CATALOG_ITEMS: CatalogItem[] = [
     node_id: 3,
     source_id: 1,
     default_quantity: "1.00",
+    price_release: 520,
+    price_estimate: 540,
   },
   {
     id: 102,
@@ -53,6 +55,8 @@ const MOCK_CATALOG_ITEMS: CatalogItem[] = [
     node_id: 3,
     source_id: 1,
     default_quantity: "1.00",
+    price_release: 610,
+    price_estimate: 640,
   },
   {
     id: 103,
@@ -62,6 +66,8 @@ const MOCK_CATALOG_ITEMS: CatalogItem[] = [
     node_id: 4,
     source_id: 1,
     default_quantity: "1.00",
+    price_release: 890,
+    price_estimate: 910,
   },
 ];
 

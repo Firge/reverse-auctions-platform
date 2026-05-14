@@ -158,6 +158,22 @@ function parseClaims(token?: string | null): JwtClaims | null {
   }
 }
 
+function getValidStoredTokens(): TokenPair | null {
+  const stored = getStoredTokens();
+  if (!stored?.access) return stored;
+  const claims = parseClaims(stored.access);
+  if (!claims?.exp) {
+    setStoredTokens(null);
+    return null;
+  }
+  const expMs = claims.exp * 1000;
+  if (expMs <= Date.now()) {
+    setStoredTokens(null);
+    return null;
+  }
+  return stored;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "Черновик",
   PUBLISHED: "Опубликован",
@@ -787,7 +803,7 @@ function LotPicker({
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
   const [apiBase] = useState(getStoredApiBase());
-  const [tokens, setTokens] = useState<TokenPair | null>(getStoredTokens());
+  const [tokens, setTokens] = useState<TokenPair | null>(() => getValidStoredTokens());
   const tokensRef = useRef<TokenPair | null>(tokens);
   const [toast, setToast] = useState<Toast>(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
@@ -1324,9 +1340,10 @@ export function App() {
     let missingCount = 0;
     for (const lot of createLots) {
       const item = createLotsDetails[lot.id];
-      const price = item?.price_release ?? item?.price_estimate;
-      if (price) {
-        prices.push(Number(price));
+      const rawPrice = item?.price_release ?? item?.price_estimate;
+      const priceValue = rawPrice == null ? NaN : Number(rawPrice);
+      if (Number.isFinite(priceValue)) {
+        prices.push(priceValue);
       } else {
         missingCount += 1;
       }
@@ -2275,7 +2292,10 @@ export function App() {
                     <button
                       type="button"
                       className="mk-ghost"
-                      onClick={() => setShowPriceCalc(true)}
+                      onClick={() => {
+                        setPriceCalcMsg("");
+                        setShowPriceCalc(true);
+                      }}
                       disabled={createLoading}
                     >
                       Рассчитать среднюю стоимость
@@ -2313,14 +2333,15 @@ export function App() {
                       <div className="mk-lot-picker">
                         {createLots.map((lot) => {
                           const item = createLotsDetails[lot.id];
-                          const price = item?.price_release ?? item?.price_estimate;
+                          const rawPrice = item?.price_release ?? item?.price_estimate;
+                          const priceValue = rawPrice == null ? NaN : Number(rawPrice);
                           return (
                             <div key={lot.id} className="mk-catalog-row">
                               <div>
                                 <strong>{item?.name ?? "Загрузка..."}</strong>
                                 <span>{item?.code ?? "-"}</span>
-                                {price ? (
-                                  <span>Цена: {money(price)}</span>
+                                {Number.isFinite(priceValue) ? (
+                                  <span>Цена: {money(priceValue)}</span>
                                 ) : (
                                   <span className="mk-warning">Цена отсутствует</span>
                                 )}
