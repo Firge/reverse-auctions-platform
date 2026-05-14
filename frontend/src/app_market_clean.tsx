@@ -57,6 +57,9 @@ type Route =
   | { name: "browse" }
   | { name: "auction"; id: number }
   | { name: "sell" }
+  | { name: "delivery" }
+  | { name: "warehouses" }
+  | { name: "rental" }
   | { name: "login" }
   | { name: "register" }
   | { name: "account" };
@@ -127,6 +130,9 @@ function parseRoute(path: string): Route {
   if (path === "/" || !path) return { name: "home" };
   if (path === "/auctions") return { name: "browse" };
   if (path === "/sell" || path === "/create-auction") return { name: "sell" };
+  if (path === "/delivery") return { name: "delivery" };
+  if (path === "/warehouses") return { name: "warehouses" };
+  if (path === "/rental") return { name: "rental" };
   if (path === "/login") return { name: "login" };
   if (path === "/register") return { name: "register" };
   if (path === "/account") return { name: "account" };
@@ -138,7 +144,13 @@ function routePath(r: Route) {
     ? `/auction/${r.id}`
     : r.name === "home"
       ? "/"
-      : `/${r.name === "browse" ? "auctions" : r.name === "sell" ? "create-auction" : r.name}`;
+      : `/${
+          r.name === "browse"
+            ? "auctions"
+            : r.name === "sell"
+              ? "create-auction"
+              : r.name
+        }`;
 }
 
 function parseClaims(token?: string | null): JwtClaims | null {
@@ -1641,6 +1653,27 @@ export function App() {
           </button>
           <button
             type="button"
+            className={navActive("delivery") ? "mk-pill active" : "mk-pill"}
+            onClick={() => go({ name: "delivery" })}
+          >
+            Доставка
+          </button>
+          <button
+            type="button"
+            className={navActive("warehouses") ? "mk-pill active" : "mk-pill"}
+            onClick={() => go({ name: "warehouses" })}
+          >
+            Склады
+          </button>
+          <button
+            type="button"
+            className={navActive("rental") ? "mk-pill active" : "mk-pill"}
+            onClick={() => go({ name: "rental" })}
+          >
+            Аренда
+          </button>
+          <button
+            type="button"
             className={navActive("sell") ? "mk-pill active" : "mk-pill"}
             onClick={() => go({ name: "sell" })}
           >
@@ -1749,35 +1782,33 @@ export function App() {
               {!endingSoon.length ? <div className="mk-empty small">Активных аукционов пока нет.</div> : null}
             </div>
           </Card>
-          <Card
-            title="Сервисы платформы"
-            subtitle="Заглушки будущих модулей: доставка, склады и аренда спецтехники."
-          >
-            <div className="mk-service-grid">
-              <div className="mk-service-tile">
-                <div className="mk-service-icon">D</div>
-                <div>
-                  <strong>Доставка</strong>
-                  <span>Расчет маршрутов, слоты и статусы отгрузок. Скоро.</span>
-                </div>
-              </div>
-              <div className="mk-service-tile">
-                <div className="mk-service-icon">W</div>
-                <div>
-                  <strong>Склады</strong>
-                  <span>Остатки, бронирования и перемещения между складами. Скоро.</span>
-                </div>
-              </div>
-              <div className="mk-service-tile">
-                <div className="mk-service-icon">R</div>
-                <div>
-                  <strong>Аренда спецтехники</strong>
-                  <span>Каталог техники, доступность и заявки на аренду. Скоро.</span>
-                </div>
-              </div>
+        </>
+      ) : null}
+
+      {route.name === "delivery" ? (
+        <div className="mk-page-centered">
+          <Card title="Доставка" subtitle="Модуль находится в разработке.">
+            <div className="mk-empty">
+              Здесь появятся заявки на доставку, расчет маршрутов и статусы отгрузок.
             </div>
           </Card>
-        </>
+        </div>
+      ) : null}
+
+      {route.name === "warehouses" ? (
+        <div className="mk-page-centered">
+          <Card title="Склады" subtitle="Модуль находится в разработке.">
+            <div className="mk-empty">Здесь появятся остатки, бронирования и перемещения.</div>
+          </Card>
+        </div>
+      ) : null}
+
+      {route.name === "rental" ? (
+        <div className="mk-page-centered">
+          <Card title="Аренда спецтехники" subtitle="Модуль находится в разработке.">
+            <div className="mk-empty">Здесь появится каталог техники и заявки на аренду.</div>
+          </Card>
+        </div>
       ) : null}
 
       {route.name === "browse" ? (
